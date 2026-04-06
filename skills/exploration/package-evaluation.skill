@@ -1,0 +1,64 @@
+---
+name: package-evaluation
+version: 2.0.0
+domain: exploration
+description: Evaluate a single package for adoption risk, supply-chain quality, maintenance health, and production suitability.
+tags: [exploration, package, due-diligence, supply-chain]
+---
+
+## Purpose
+Perform due diligence on one package before adoption.
+
+## When to Use
+Use when a dependency is already shortlisted and needs a yes or no adoption decision.
+
+## Input Format
+```yaml
+package:
+  name: string
+  ecosystem: string
+  purpose: string
+requirements:
+  criticality: "low" | "medium" | "high"
+  license_constraints: string[]
+  security_sensitivity: boolean
+```
+
+## Output Format
+```yaml
+decision:
+  adopt: boolean
+  confidence: "high" | "medium" | "low"
+  rationale: string
+checks:
+  maintenance: string
+  security: string
+  production_readiness: string
+follow_up:
+  actions: string[]
+```
+
+## Execution Logic
+1. Evaluate maintenance health, release cadence, docs, and issue posture.
+2. Check security-sensitive factors such as permissions, native bindings, and supply-chain exposure.
+3. Compare package risk to project criticality.
+4. Return adoption decision plus follow-up controls if adoption proceeds.
+
+## Rules
+1. Critical-path packages require a higher bar than utility packages.
+2. Include license, bus factor, and maintenance recency.
+3. Note whether the package is replaceable if it stagnates.
+4. Prefer packages with stable APIs and clear changelogs.
+5. State what monitoring or pinning is needed after adoption.
+
+## Constraints
+- Never adopt high-risk packages silently.
+- Never ignore security-sensitive transitive behavior.
+- Never output “good package” without evidence categories.
+
+## Examples
+Input: evaluate an auth SDK for mobile and web.
+Output: adopt/no-adopt decision with maintenance, security, and rollout controls.
+
+## Output Style
+Return a short adoption memo with explicit decision and follow-up.

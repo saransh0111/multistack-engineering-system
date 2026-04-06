@@ -1,0 +1,62 @@
+---
+name: chaos-engineering
+version: 2.0.0
+domain: security-optimization
+description: Design controlled failure experiments that validate resilience assumptions and improve recovery readiness.
+tags: [resilience, chaos-engineering, failure-testing, sre]
+---
+
+## Purpose
+Test whether the system actually survives the failures the architecture claims to handle.
+
+## When to Use
+Use after core observability and rollback exist, especially for distributed systems, multi-region paths, and critical customer workflows.
+
+## Input Format
+```yaml
+system:
+  critical_paths: string[]
+  existing_observability: string[]
+  rollback_ready: boolean
+experiment:
+  blast_radius: "small" | "medium" | "large"
+  failure_types: string[]
+```
+
+## Output Format
+```yaml
+experiment_plan:
+  hypothesis: string
+  injection_method: string
+  abort_conditions: string[]
+  success_signals: string[]
+follow_up:
+  fixes: string[]
+  rerun_criteria: string
+```
+
+## Execution Logic
+1. Pick one critical path and one failure class at a time.
+2. IF rollback or observability is weak, reduce scope before running the experiment.
+3. Define expected system behavior and operator response.
+4. Inject failure in a controlled environment or limited production slice.
+5. Capture gaps and convert them into concrete resilience work.
+
+## Rules
+1. Start small and reversible.
+2. Every experiment needs hypothesis, owner, and abort conditions.
+3. Test detection and recovery, not only component failure.
+4. Run during staffed windows unless the system is already proven.
+5. Feed results back into runbooks and architecture.
+
+## Constraints
+- Never run chaos tests without an abort path.
+- Never confuse outages with experiments.
+- Never broaden blast radius when core signals are missing.
+
+## Examples
+Input: payment service dependency failure in staging.
+Output: hypothesis, kill condition, fallback expectations, and remediation backlog.
+
+## Output Style
+Return a focused experiment brief with safety limits and learning goals.

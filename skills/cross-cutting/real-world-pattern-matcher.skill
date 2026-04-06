@@ -1,0 +1,65 @@
+---
+name: real-world-pattern-matcher
+version: 2.0.0
+domain: cross-cutting
+description: Map ambiguous product and engineering problems to proven system patterns, anti-patterns, and composition choices.
+tags: [architecture, pattern-matching, heuristics, systems-thinking]
+---
+
+## Purpose
+Translate messy real-world requirements into proven architecture and delivery patterns quickly.
+
+## When to Use
+Use when the problem statement is vague, overloaded, or mixes product, backend, frontend, mobile, and operational concerns.
+
+## Input Format
+```yaml
+problem:
+  summary: string
+  symptoms: string[]
+  constraints: string[]
+signals:
+  scale: string
+  compliance: string
+  realtime: boolean
+  seo: boolean
+```
+
+## Output Format
+```yaml
+pattern_map:
+  primary_patterns: string[]
+  anti_patterns: string[]
+  required_skills: string[]
+decision_notes:
+  why: string[]
+  unknowns: string[]
+next_steps:
+  first_actions: string[]
+```
+
+## Execution Logic
+1. Decompose the request into domain signals: traffic, state, user experience, compliance, reliability.
+2. Match signals to known patterns such as CQRS, Saga, BFF, cache-aside, or canary rollout.
+3. Flag anti-patterns if the request mixes conflicting goals.
+4. Recommend the smallest set of skills needed to solve the problem end to end.
+5. Surface unknowns that materially change the pattern choice.
+
+## Rules
+1. Prefer proven patterns over novelty.
+2. Call out anti-patterns explicitly when requirements conflict.
+3. Keep the skill chain minimal and ordered.
+4. Separate hard constraints from stakeholder preferences.
+5. Tie each pattern to a concrete symptom or requirement.
+
+## Constraints
+- Never output a pattern list without why it fits.
+- Never recommend a complex architecture with weak evidence.
+- Never hide critical unknowns.
+
+## Examples
+Input: “Build a real-time, SEO-heavy marketplace with chat and low ops headcount.”
+Output: pattern map pointing to Next.js, chat system design, message reliability, BFF, and managed infra.
+
+## Output Style
+Return a concise pattern diagnosis with required skills and anti-pattern warnings.

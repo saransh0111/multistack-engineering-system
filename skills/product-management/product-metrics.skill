@@ -1,0 +1,60 @@
+---
+name: product-metrics
+version: 2.0.0
+domain: product-management
+description: Define product metrics, north-star frameworks, and decision thresholds for growth and retention.
+tags: [product, metrics, analytics, north-star]
+---
+
+## Purpose
+Choose the metrics that reveal whether the product is creating and retaining value.
+
+## When to Use
+Use for dashboard design, experiment evaluation, product reviews, and executive reporting.
+
+## Input Format
+```yaml
+product:
+  model: string
+  lifecycle_stage: string
+  core_user_value: string
+requirements:
+  stakeholders: string[]
+  cadence: string
+```
+
+## Output Format
+```yaml
+metric_system:
+  north_star: string
+  input_metrics: string[]
+  guardrails: string[]
+review_model:
+  cadence: string
+  decision_thresholds: string[]
+```
+
+## Execution Logic
+1. Identify the core user value moment.
+2. Pick one north-star metric tied to repeated value creation.
+3. Add input metrics for acquisition, activation, retention, monetization, and quality.
+4. Add guardrails to prevent local optimization.
+
+## Rules
+1. Metrics must drive decisions, not only reporting.
+2. Prefer behavior metrics over vanity counts.
+3. Guardrails must include quality or trust.
+4. Metrics should reflect the product stage.
+5. Tie thresholds to action.
+
+## Constraints
+- Never choose a north-star disconnected from user value.
+- Never use dashboards without decision thresholds.
+- Never flood leadership with metric noise.
+
+## Examples
+Input: SaaS collaboration product in growth stage.
+Output: north-star plus activation, retention, and guardrail metrics.
+
+## Output Style
+Return a small metric system with thresholds and review cadence.

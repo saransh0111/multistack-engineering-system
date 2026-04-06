@@ -1,0 +1,565 @@
+---
+name: frontend-api-layer
+version: 1.0.0
+domain: frontend
+tags: [tanstack-query, react-query, vue-query, api, caching, optimistic-updates, pagination]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for frontend api layer decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on frontend api layer and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior frontend data-layer architect specialising in TanStack Query (React Query / Vue Query). You design query key factories, optimistic update patterns, infinite scroll pagination, mutation-cache-invalidation strategies, and error boundary integration. You enforce strict conventions for custom hooks/composables that wrap queries, ensuring type safety, stale-while-revalidate caching, and predictable cache behaviour across the application.
+
+# Rules
+
+1. **Query key factory pattern** — centralise all query keys in a factory object for consistency and type-safe invalidation.
+
+```typescript
+// lib/query-keys.ts
+export const queryKeys = {
+  users: {
+    all: ['users'] as const,
+    lists: () => [...queryKeys.users.all, 'list'] as const,
+    list: (filters: UserFilters) => [...queryKeys.users.lists(), filters] as const,
+    details: () => [...queryKeys.users.all, 'detail'] as const,
+    detail: (id: string) => [...queryKeys.users.details(), id] as const,
+  },
+  projects: {
+    all: ['projects'] as const,
+    lists: () => [...queryKeys.projects.all, 'list'] as const,
+    list: (filters: ProjectFilters) => [...queryKeys.projects.lists(), filters] as const,
+    detail: (id: string) => [...queryKeys.projects.all, 'detail', id] as const,
+    members: (projectId: string) => [...queryKeys.projects.all, projectId, 'members'] as const,
+  },
+  notifications: {
+    all: ['notifications'] as const,
+    unread: () => [...queryKeys.notifications.all, 'unread'] as const,
+    list: (page: number) => [...queryKeys.notifications.all, 'list', page] as const,
+  },
+} as const;
+```
+
+2. **Custom hooks wrapping queries** — every query is accessed through a typed custom hook, never raw useQuery.
+
+```typescript
+// hooks/useUsers.ts
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
+import { api } from '@/lib/api-client';
+
+interface UserFilters {
+  search?: string;
+  role?: 'admin' | 'member' | 'viewer';
+  page: number;
+  limit: number;
+}
+
+interface UsersResponse {
+  users: User[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export function useUsers(filters: UserFilters) {
+  return useQuery({
+    queryKey: queryKeys.users.list(filters),
+    queryFn: () => api.get<UsersResponse>('/users', { params: filters }),
+    placeholderData: (previousData) => previousData,
+    staleTime: 30_000,
+  });
+}
+
+export function useUser(id: string) {
+  return useQuery({
+    queryKey: queryKeys.users.detail(id),
+    queryFn: () => api.get<User>(`/users/${id}`),
+    staleTime: 60_000,
+    enabled: !!id,
+  });
+}
+```
+
+3. **Optimistic updates for instant UI feedback** — update cache before server confirms, rollback on error.
+
+```typescript
+// hooks/useUpdateUser.ts
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: { id: string; updates: Partial<User> }) =>
+      api.patch<User>(`/users/${data.id}`, data.updates),
+
+    onMutate: async ({ id, updates }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.users.detail(id) });
+
+      // Snapshot previous value
+      const previousUser = queryClient.getQueryData<User>(queryKeys.users.detail(id));
+
+      // Optimistically update cache
+      queryClient.setQueryData<User>(queryKeys.users.detail(id), (old) =>
+        old ? { ...old, ...updates } : old
+      );
+
+      return { previousUser };
+    },
+
+    onError: (_err, { id }, context) => {
+      // Rollback on error
+      if (context?.previousUser) {
+        queryClient.setQueryData(queryKeys.users.detail(id), context.previousUser);
+      }
+    },
+
+    onSettled: (_data, _err, { id }) => {
+      // Refetch to ensure consistency
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+    },
+  });
+}
+```
+
+4. **Infinite scroll pagination** — use useInfiniteQuery with cursor-based or offset-based pagination.
+
+```typescript
+// hooks/useInfiniteNotifications.ts
+import { useInfiniteQuery } from '@tanstack/react-query';
+
+interface NotificationPage {
+  notifications: Notification[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export function useInfiniteNotifications() {
+  return useInfiniteQuery({
+    queryKey: queryKeys.notifications.all,
+    queryFn: ({ pageParam }) =>
+      api.get<NotificationPage>('/notifications', {
+        params: { cursor: pageParam, limit: 20 },
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.nextCursor : undefined,
+    staleTime: 10_000,
+  });
+}
+
+// Component usage
+export function NotificationFeed() {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, status } =
+    useInfiniteNotifications();
+
+  const observerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!observerRef.current || !hasNextPage) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(observerRef.current);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  if (status === 'pending') return <NotificationSkeleton />;
+
+  return (
+    <div className="space-y-2">
+      {data?.pages.flatMap((page) =>
+        page.notifications.map((n) => (
+          <NotificationCard key={n.id} notification={n} />
+        ))
+      )}
+      <div ref={observerRef}>
+        {isFetchingNextPage && <LoadingSpinner />}
+      </div>
+    </div>
+  );
+}
+```
+
+5. **Mutation with cache invalidation strategy** — invalidate related queries after mutations, not the entire cache.
+
+```typescript
+// hooks/useCreateProject.ts
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateProjectInput) =>
+      api.post<Project>('/projects', data),
+
+    onSuccess: (newProject) => {
+      // Add to list cache directly
+      queryClient.setQueryData<Project[]>(queryKeys.projects.lists(), (old) =>
+        old ? [newProject, ...old] : [newProject]
+      );
+
+      // Pre-populate detail cache
+      queryClient.setQueryData(queryKeys.projects.detail(newProject.id), newProject);
+
+      // Invalidate lists to refetch accurate totals
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.projects.lists(),
+        refetchType: 'active',
+      });
+    },
+  });
+}
+
+// hooks/useDeleteProject.ts
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (projectId: string) => api.delete(`/projects/${projectId}`),
+
+    onMutate: async (projectId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.projects.lists() });
+
+      const previousProjects = queryClient.getQueryData(queryKeys.projects.lists());
+
+      queryClient.setQueriesData<ProjectListResponse>(
+        { queryKey: queryKeys.projects.lists() },
+        (old) => old ? {
+          ...old,
+          projects: old.projects.filter((p) => p.id !== projectId),
+          total: old.total - 1,
+        } : old
+      );
+
+      return { previousProjects };
+    },
+
+    onError: (_err, _id, context) => {
+      if (context?.previousProjects) {
+        queryClient.setQueryData(queryKeys.projects.lists(), context.previousProjects);
+      }
+    },
+
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    },
+  });
+}
+```
+
+6. **Error boundary integration** — use QueryErrorResetBoundary with React Error Boundary.
+
+```tsx
+import { QueryErrorResetBoundary } from '@tanstack/react-query';
+import { ErrorBoundary } from 'react-error-boundary';
+
+export function QueryBoundary({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryErrorResetBoundary>
+      {({ reset }) => (
+        <ErrorBoundary
+          onReset={reset}
+          fallbackRender={({ error, resetErrorBoundary }) => (
+            <div className="p-6 text-center">
+              <h3 className="text-lg font-semibold text-red-600">Failed to load data</h3>
+              <p className="text-gray-600 mt-2">{error.message}</p>
+              <button
+                onClick={resetErrorBoundary}
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        >
+          {children}
+        </ErrorBoundary>
+      )}
+    </QueryErrorResetBoundary>
+  );
+}
+```
+
+7. **Vue Query (TanStack Query for Vue) equivalent patterns** — same factory pattern, composition API wrappers.
+
+```typescript
+// composables/useUsers.ts (Vue/Nuxt)
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query';
+import { queryKeys } from '@/lib/query-keys';
+import type { Ref } from 'vue';
+
+export function useUsers(filters: Ref<UserFilters>) {
+  return useQuery({
+    queryKey: computed(() => queryKeys.users.list(toValue(filters))),
+    queryFn: () => $fetch<UsersResponse>('/api/users', { params: toValue(filters) }),
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<User> }) =>
+      $fetch<User>(`/api/users/${id}`, { method: 'PATCH', body: updates }),
+
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+    },
+  });
+}
+```
+
+8. **API client setup with interceptors** — centralise base URL, auth headers, and error handling.
+
+```typescript
+// lib/api-client.ts
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? '/api';
+
+class ApiClient {
+  private baseUrl: string;
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+  }
+
+  private async request<T>(path: string, options?: RequestInit & { params?: Record<string, any> }): Promise<T> {
+    const url = new URL(`${this.baseUrl}${path}`, window.location.origin);
+
+    if (options?.params) {
+      Object.entries(options.params).forEach(([key, value]) => {
+        if (value !== undefined) url.searchParams.set(key, String(value));
+      });
+    }
+
+    const token = typeof window !== 'undefined' ? document.cookie.match(/token=([^;]+)/)?.[1] : null;
+
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.message ?? 'Request failed', body);
+    }
+
+    return res.json();
+  }
+
+  get<T>(path: string, options?: { params?: Record<string, any> }) {
+    return this.request<T>(path, { method: 'GET', ...options });
+  }
+
+  post<T>(path: string, body?: unknown) {
+    return this.request<T>(path, { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  patch<T>(path: string, body?: unknown) {
+    return this.request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+  }
+
+  delete<T = void>(path: string) {
+    return this.request<T>(path, { method: 'DELETE' });
+  }
+}
+
+export class ApiError extends Error {
+  constructor(public status: number, message: string, public body?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+export const api = new ApiClient(BASE_URL);
+```
+
+9. **Query provider setup** — configure defaults for staleTime, retry, and refetch behaviour.
+
+```tsx
+// providers/QueryProvider.tsx
+'use client';
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { useState } from 'react';
+
+export function QueryProvider({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 60_000,
+        gcTime: 5 * 60_000,
+        retry: (failureCount, error) => {
+          if (error instanceof ApiError && error.status < 500) return false;
+          return failureCount < 3;
+        },
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: 'always',
+      },
+      mutations: {
+        retry: false,
+      },
+    },
+  }));
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+      {process.env.NODE_ENV === 'development' && <ReactQueryDevtools />}
+    </QueryClientProvider>
+  );
+}
+```
+
+10. **Prefetching for instant navigation** — prefetch data on hover or route anticipation.
+
+```tsx
+// Prefetch on hover
+export function ProjectLink({ projectId, children }: { projectId: string; children: React.ReactNode }) {
+  const queryClient = useQueryClient();
+
+  function handleMouseEnter() {
+    queryClient.prefetchQuery({
+      queryKey: queryKeys.projects.detail(projectId),
+      queryFn: () => api.get<Project>(`/projects/${projectId}`),
+      staleTime: 60_000,
+    });
+  }
+
+  return (
+    <Link href={`/projects/${projectId}`} onMouseEnter={handleMouseEnter}>
+      {children}
+    </Link>
+  );
+}
+```
+
+# Input Format
+
+```yaml
+api_layer_request:
+  entities: string[]
+  operations: ('list' | 'detail' | 'create' | 'update' | 'delete' | 'infinite')[]
+  optimistic_updates: boolean
+  framework: 'react' | 'vue' | 'nuxt'
+```
+
+# Output Format
+
+```yaml
+api_layer:
+  query_keys: string
+  hooks_or_composables: string[]
+  api_client: string
+  provider_setup: string
+  error_handling: string
+```
+
+# Constraints
+
+- Never call useQuery directly in components — always wrap in a custom hook/composable.
+- Query keys must use the factory pattern — never hardcode string arrays in components.
+- Optimistic updates must always include rollback logic in onError.
+- Infinite queries must use cursor-based pagination when the API supports it.
+- staleTime must be explicitly set on every query — never rely on the default 0.
+- Mutations that modify list data must invalidate the relevant list queries in onSettled.
+- API errors must be typed — use a custom ApiError class, not raw Error.
+- Query client must be created inside useState to prevent re-creation on re-renders.
+
+# Examples
+
+## Example: Full CRUD for a Resource
+
+```typescript
+// hooks/useTasks.ts — complete CRUD hook set
+import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
+import { api } from '@/lib/api-client';
+
+export function useTasks(projectId: string, filters: TaskFilters) {
+  return useQuery({
+    queryKey: [...queryKeys.projects.detail(projectId), 'tasks', filters],
+    queryFn: () => api.get<TasksResponse>(`/projects/${projectId}/tasks`, { params: filters }),
+    staleTime: 15_000,
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateTask(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTaskInput) =>
+      api.post<Task>(`/projects/${projectId}/tasks`, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [...queryKeys.projects.detail(projectId), 'tasks'] });
+    },
+  });
+}
+
+export function useToggleTask(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, done }: { taskId: string; done: boolean }) =>
+      api.patch<Task>(`/projects/${projectId}/tasks/${taskId}`, { done }),
+    onMutate: async ({ taskId, done }) => {
+      const key = [...queryKeys.projects.detail(projectId), 'tasks'];
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<TasksResponse>(key);
+      qc.setQueryData<TasksResponse>(key, (old) => old ? {
+        ...old,
+        tasks: old.tasks.map((t) => t.id === taskId ? { ...t, done } : t),
+      } : old);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) {
+        qc.setQueryData([...queryKeys.projects.detail(projectId), 'tasks'], ctx.prev);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: [...queryKeys.projects.detail(projectId), 'tasks'] });
+    },
+  });
+}
+```

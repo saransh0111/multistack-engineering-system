@@ -1,0 +1,96 @@
+---
+name: component-system-primitives
+version: 2.0.0
+domain: frontend
+description: Design accessible frontend primitive systems with composition, variants, tokens, and installable implementation patterns inspired by best-in-class component libraries.
+tags: [frontend, components, design-system, accessibility, primitives]
+---
+
+## Purpose
+Build or upgrade a frontend primitive layer so teams stop reinventing buttons, dialogs, menus, tables, and form controls inconsistently.
+
+## When to Use
+Use when starting or repairing a design system, standardizing UI primitives, or replacing ad hoc feature-level components with composable building blocks.
+
+## Input Format
+```yaml
+system:
+  framework: "react" | "nextjs" | "nuxt"
+  styling: "tailwind" | "css-modules" | "vanilla-extract"
+  headless_primitives: boolean
+requirements:
+  accessibility: "AA" | "AAA"
+  themes: string[]
+  density_modes: string[]
+scope:
+  primitives: string[]
+```
+
+## Output Format
+```yaml
+primitive_plan:
+  architecture: string
+  required_primitives: string[]
+  variant_model: string[]
+  state_tokens: string[]
+implementation_notes:
+  distribution_model: string
+  accessibility_patterns: string[]
+  composition_rules: string[]
+  documentation_requirements: string[]
+  migration_strategy: string[]
+```
+
+## Execution Logic
+1. Identify which components are true primitives and which are feature composites.
+2. Define an accessible primitive contract for each shared building block.
+3. Establish variant APIs that are small, predictable, and token-driven.
+4. IF a headless primitive layer is available, compose on top of it instead of rebuilding focus and keyboard behavior.
+5. Prefer an open-code or copy-in model when teams need deep customization, not a black-box package.
+6. Return migration guidance so local feature components can converge into the system.
+
+## Rules
+1. Composition beats giant prop-driven monolith components.
+2. Shared components need keyboard behavior and visual state documentation.
+3. Variants must map to product semantics: default, secondary, destructive, ghost, loading, etc.
+4. Primitive styling must be tokenized and themeable.
+5. Keep API surface small enough that teams can learn it quickly.
+6. Expose primitives as code the team can customize, extend, and own.
+7. Separate primitives from composites and page patterns.
+8. Treat forms, overlays, tables, and navigation primitives as first-class.
+
+## Constraints
+- Never create a design system from screenshots only.
+- Never ship shared primitives without accessible state behavior.
+- Never let primitives depend on feature-specific business logic.
+- Never hide the primitive behavior behind opaque generated wrappers that teams cannot adapt.
+
+## Recommended Primitive Set
+
+- Button
+- Input
+- Textarea
+- Select
+- Checkbox
+- RadioGroup
+- Switch
+- Dialog
+- Drawer
+- Popover
+- DropdownMenu
+- Tooltip
+- Tabs
+- Accordion
+- Table
+- Toast
+- Skeleton
+- Command palette
+- Breadcrumb
+- Pagination
+
+## Examples
+Input: Next.js app with duplicated modals, buttons, and dropdowns across teams.
+Output: primitive inventory, headless composition strategy, variant rules, and migration plan.
+
+## Output Style
+Return a primitive-system blueprint with composition and migration guidance.

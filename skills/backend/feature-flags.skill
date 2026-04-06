@@ -1,0 +1,67 @@
+---
+name: feature-flags
+version: 2.0.0
+domain: backend
+description: Design feature flag taxonomies, rollout policies, kill switches, and cleanup plans for safe delivery.
+tags: [backend, feature-flags, rollout, experimentation, kill-switch]
+---
+
+## Purpose
+Use feature flags as a controlled release mechanism rather than a permanent branching system.
+
+## When to Use
+Use for risky launches, phased rollouts, tenant-specific enablement, experiments, and emergency kill switches.
+
+## Input Format
+```yaml
+feature:
+  name: string
+  category: "release" | "ops" | "experiment" | "permission"
+  blast_radius: "low" | "medium" | "high"
+targeting:
+  tenants: string[]
+  cohorts: string[]
+requirements:
+  instant_disable: boolean
+  expiry_days: number
+```
+
+## Output Format
+```yaml
+flag_plan:
+  flag_type: string
+  evaluation_point: string
+  ownership: string
+rollout:
+  stages: string[]
+  metrics: string[]
+retirement:
+  expiry: string
+  cleanup_tasks: string[]
+```
+
+## Execution Logic
+1. Classify the flag by purpose and intended lifetime.
+2. IF the flag is long-lived permissioning, treat it as configuration with ownership and schema.
+3. IF the flag is temporary release control, define staged rollout and deletion date up front.
+4. IF the blast radius is high, add a kill switch and success metrics before launch.
+5. Return rollout, monitoring, and cleanup steps together.
+
+## Rules
+1. Every flag needs an owner, rationale, and expiry.
+2. Evaluate flags at stable boundaries such as request entry or job start.
+3. Keep targeting rules deterministic and auditable.
+4. Prefer server-side evaluation for security-sensitive behavior.
+5. Delete dead flags quickly to prevent path explosion.
+
+## Constraints
+- Never use nested flag logic without a strong reason.
+- Never let experiments bypass security or compliance controls.
+- Never create a flag without a retirement plan.
+
+## Examples
+Input: staged rollout of a new checkout service to 5 tenants.
+Output: release flag, tenant allowlist, canary metrics, instant kill switch, and 30-day cleanup date.
+
+## Output Style
+Return a rollout brief with lifecycle, metrics, and removal plan.

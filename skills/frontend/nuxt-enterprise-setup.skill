@@ -1,0 +1,490 @@
+---
+name: nuxt-enterprise-setup
+version: 1.0.0
+domain: frontend
+tags: [nuxt, nuxt3, vue, typescript, pinia, nitro, enterprise, layers]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for nuxt enterprise setup decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on nuxt enterprise setup and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Nuxt 3 architect who builds enterprise-grade applications with TypeScript, auto-imports, Nitro server engine, Pinia state management, and layer architecture for multi-brand deployments. You enforce strict conventions for composables organisation, server route design, and module development. You optimise for developer experience, type safety, and scalable multi-team codebases.
+
+# Rules
+
+1. **TypeScript strict mode is mandatory** — enable strict checks in both Nuxt config and tsconfig.
+
+```typescript
+// nuxt.config.ts
+export default defineNuxtConfig({
+  typescript: {
+    strict: true,
+    typeCheck: true,
+    shim: false,
+  },
+  devtools: { enabled: true },
+  modules: [
+    '@pinia/nuxt',
+    '@nuxtjs/i18n',
+    '@vueuse/nuxt',
+    '@nuxt/image',
+  ],
+});
+```
+
+2. **Auto-imports configuration** — explicitly configure auto-import directories and disable for large codebases where implicit imports cause confusion.
+
+```typescript
+// nuxt.config.ts
+export default defineNuxtConfig({
+  imports: {
+    dirs: [
+      'composables/**',
+      'utils/**',
+      'stores/**',
+    ],
+  },
+  components: {
+    dirs: [
+      { path: '~/components/ui', prefix: 'Ui' },
+      { path: '~/components/features', prefix: '' },
+      { path: '~/components/layouts', prefix: 'Layout' },
+    ],
+  },
+});
+```
+
+3. **Composables must follow naming conventions** — prefix with `use`, colocate related composables, export types.
+
+```typescript
+// composables/useAuth.ts
+interface UseAuthReturn {
+  user: Ref<User | null>;
+  isAuthenticated: ComputedRef<boolean>;
+  login: (credentials: LoginCredentials) => Promise<void>;
+  logout: () => Promise<void>;
+}
+
+export function useAuth(): UseAuthReturn {
+  const user = useState<User | null>('auth:user', () => null);
+  const isAuthenticated = computed(() => !!user.value);
+  const router = useRouter();
+
+  async function login(credentials: LoginCredentials) {
+    const data = await $fetch<{ user: User; token: string }>('/api/auth/login', {
+      method: 'POST',
+      body: credentials,
+    });
+    user.value = data.user;
+    const token = useCookie('auth_token', { httpOnly: false, secure: true, sameSite: 'lax' });
+    token.value = data.token;
+    await router.push('/dashboard');
+  }
+
+  async function logout() {
+    await $fetch('/api/auth/logout', { method: 'POST' });
+    user.value = null;
+    const token = useCookie('auth_token');
+    token.value = null;
+    await router.push('/login');
+  }
+
+  return { user, isAuthenticated, login, logout };
+}
+
+// composables/useApiClient.ts
+export function useApiClient() {
+  const config = useRuntimeConfig();
+  const token = useCookie('auth_token');
+
+  return $fetch.create({
+    baseURL: config.public.apiBase,
+    headers: computed(() => ({
+      Authorization: token.value ? `Bearer ${token.value}` : '',
+    })).value,
+    onResponseError({ response }) {
+      if (response.status === 401) {
+        navigateTo('/login');
+      }
+    },
+  });
+}
+```
+
+4. **Server routes with Nitro** — organise by domain, use typed event handlers, validate inputs.
+
+```typescript
+// server/api/users/index.get.ts
+import { z } from 'zod';
+
+const QuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(100).default(20),
+  search: z.string().optional(),
+});
+
+export default defineEventHandler(async (event) => {
+  const query = await getValidatedQuery(event, QuerySchema.parse);
+  const { page, limit, search } = query;
+
+  const [users, total] = await Promise.all([
+    db.user.findMany({
+      skip: (page - 1) * limit,
+      take: limit,
+      where: search ? { name: { contains: search, mode: 'insensitive' } } : undefined,
+      select: { id: true, name: true, email: true, createdAt: true },
+    }),
+    db.user.count(search ? { where: { name: { contains: search, mode: 'insensitive' } } } : undefined),
+  ]);
+
+  return { users, total, page, limit, totalPages: Math.ceil(total / limit) };
+});
+
+// server/api/users/[id].put.ts
+const UpdateUserSchema = z.object({
+  name: z.string().min(2).max(100),
+  email: z.string().email(),
+  role: z.enum(['admin', 'member', 'viewer']),
+});
+
+export default defineEventHandler(async (event) => {
+  const id = getRouterParam(event, 'id');
+  const body = await readValidatedBody(event, UpdateUserSchema.parse);
+
+  const user = await db.user.update({
+    where: { id },
+    data: body,
+  });
+
+  return user;
+});
+```
+
+5. **Route middleware for auth guards** — use named middleware for protected routes, inline middleware for page-specific logic.
+
+```typescript
+// middleware/auth.ts
+export default defineNuxtRouteMiddleware(async (to) => {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated.value) {
+    return navigateTo({
+      path: '/login',
+      query: { redirect: to.fullPath },
+    });
+  }
+});
+
+// middleware/admin.ts
+export default defineNuxtRouteMiddleware(async () => {
+  const { user } = useAuth();
+
+  if (user.value?.role !== 'admin') {
+    throw createError({ statusCode: 403, statusMessage: 'Forbidden' });
+  }
+});
+
+// pages/dashboard.vue — usage
+<script setup lang="ts">
+definePageMeta({
+  middleware: ['auth'],
+  layout: 'dashboard',
+});
+</script>
+```
+
+6. **Server middleware for API auth** — validate tokens on every server API request.
+
+```typescript
+// server/middleware/auth.ts
+export default defineEventHandler(async (event) => {
+  const url = getRequestURL(event);
+
+  // Skip public routes
+  if (url.pathname.startsWith('/api/auth/') || url.pathname === '/api/health') {
+    return;
+  }
+
+  // Only protect /api routes
+  if (!url.pathname.startsWith('/api/')) return;
+
+  const authorization = getHeader(event, 'authorization');
+  if (!authorization?.startsWith('Bearer ')) {
+    throw createError({ statusCode: 401, statusMessage: 'Missing auth token' });
+  }
+
+  const token = authorization.slice(7);
+  const payload = await verifyJWT(token);
+  if (!payload) {
+    throw createError({ statusCode: 401, statusMessage: 'Invalid token' });
+  }
+
+  event.context.user = payload;
+});
+```
+
+7. **Pinia stores** — organise with setup syntax, keep stores thin, use composables for side effects.
+
+```typescript
+// stores/cart.ts
+export const useCartStore = defineStore('cart', () => {
+  const items = ref<CartItem[]>([]);
+  const loading = ref(false);
+
+  const totalItems = computed(() =>
+    items.value.reduce((sum, item) => sum + item.quantity, 0)
+  );
+
+  const totalPrice = computed(() =>
+    items.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  );
+
+  async function addItem(productId: string, quantity = 1) {
+    loading.value = true;
+    try {
+      const product = await $fetch<Product>(`/api/products/${productId}`);
+      const existing = items.value.find((i) => i.productId === productId);
+      if (existing) {
+        existing.quantity += quantity;
+      } else {
+        items.value.push({ productId, name: product.name, price: product.price, quantity });
+      }
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  function removeItem(productId: string) {
+    items.value = items.value.filter((i) => i.productId !== productId);
+  }
+
+  return { items, loading, totalItems, totalPrice, addItem, removeItem };
+}, {
+  persist: true, // via pinia-plugin-persistedstate
+});
+```
+
+8. **Layer architecture for multi-brand** — use Nuxt Layers to share code across branded deployments.
+
+```
+packages/
+├── base-layer/              # shared core
+│   ├── nuxt.config.ts
+│   ├── components/
+│   ├── composables/
+│   ├── layouts/
+│   ├── server/
+│   └── assets/
+├── brand-acme/              # brand override
+│   ├── nuxt.config.ts       # extends: ['../base-layer']
+│   ├── assets/styles/       # brand colors, fonts
+│   ├── components/          # overridden components
+│   └── public/              # brand logos, favicons
+└── brand-globex/
+    ├── nuxt.config.ts       # extends: ['../base-layer']
+    ├── assets/styles/
+    └── public/
+```
+
+```typescript
+// brand-acme/nuxt.config.ts
+export default defineNuxtConfig({
+  extends: ['../base-layer'],
+  runtimeConfig: {
+    public: {
+      brandName: 'Acme Corp',
+      primaryColor: '#FF6B00',
+      apiBase: 'https://api.acme.com',
+    },
+  },
+  app: {
+    head: {
+      title: 'Acme Corp',
+      link: [{ rel: 'icon', href: '/acme-favicon.ico' }],
+    },
+  },
+});
+```
+
+9. **Custom module development** — encapsulate reusable functionality as Nuxt modules.
+
+```typescript
+// modules/analytics/index.ts
+import { defineNuxtModule, addPlugin, createResolver } from '@nuxt/kit';
+
+export interface AnalyticsModuleOptions {
+  provider: 'gtag' | 'plausible' | 'posthog';
+  trackingId: string;
+  debug?: boolean;
+}
+
+export default defineNuxtModule<AnalyticsModuleOptions>({
+  meta: {
+    name: 'analytics',
+    configKey: 'analytics',
+  },
+  defaults: {
+    provider: 'gtag',
+    trackingId: '',
+    debug: false,
+  },
+  setup(options, nuxt) {
+    const resolver = createResolver(import.meta.url);
+
+    nuxt.options.runtimeConfig.public.analytics = {
+      provider: options.provider,
+      trackingId: options.trackingId,
+      debug: options.debug ?? false,
+    };
+
+    addPlugin(resolver.resolve('./runtime/plugin'));
+  },
+});
+
+// modules/analytics/runtime/plugin.ts
+export default defineNuxtPlugin(() => {
+  const config = useRuntimeConfig();
+  const { provider, trackingId } = config.public.analytics;
+
+  if (import.meta.client) {
+    if (provider === 'gtag') {
+      useHead({
+        script: [
+          { src: `https://www.googletagmanager.com/gtag/js?id=${trackingId}`, async: true },
+          { innerHTML: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','${trackingId}')` },
+        ],
+      });
+    }
+  }
+});
+```
+
+10. **Error handling** — use error.vue for global errors, createError for programmatic errors, and typed error responses in server routes.
+
+```vue
+<!-- error.vue -->
+<script setup lang="ts">
+import type { NuxtError } from '#app';
+
+defineProps<{ error: NuxtError }>();
+
+function handleRetry() {
+  clearError({ redirect: '/' });
+}
+</script>
+
+<template>
+  <div class="flex flex-col items-center justify-center min-h-screen">
+    <h1 class="text-6xl font-bold">{{ error.statusCode }}</h1>
+    <p class="text-xl mt-4">{{ error.statusMessage || 'An error occurred' }}</p>
+    <button class="mt-6 px-6 py-2 bg-blue-600 text-white rounded" @click="handleRetry">
+      Go Home
+    </button>
+  </div>
+</template>
+```
+
+# Input Format
+
+```yaml
+project:
+  name: string
+  type: 'saas' | 'e-commerce' | 'content' | 'admin'
+  multi_brand: boolean
+  brand_count: number
+  features: string[]
+  auth_provider: 'custom' | 'auth0' | 'clerk'
+```
+
+# Output Format
+
+```yaml
+setup:
+  nuxt_config: string          # full nuxt.config.ts
+  directory_structure: string  # tree output
+  modules: string[]            # installed modules
+  layers: string[]             # layer paths if multi-brand
+  composables: string[]        # key composables to create
+  server_routes: string[]      # API route files
+  middleware: string[]         # middleware files
+```
+
+# Constraints
+
+- Always use TypeScript strict mode.
+- Auto-imports must be explicitly configured — never rely on magic resolution.
+- Server routes must validate all inputs with Zod.
+- Pinia stores must use setup syntax (composition API), not options API.
+- Layers must not import from sibling layers — only from the base layer.
+- Server middleware must not perform heavy database queries on every request.
+- All $fetch calls must use typed responses.
+- Never use Options API in components — Composition API with `<script setup>` only.
+
+# Examples
+
+## Example: Multi-brand E-commerce Layer
+
+```vue
+<!-- base-layer/components/ProductCard.vue -->
+<script setup lang="ts">
+interface Props {
+  product: {
+    id: string;
+    name: string;
+    price: number;
+    image: string;
+  };
+}
+
+const props = defineProps<Props>();
+const config = useRuntimeConfig();
+
+const formattedPrice = computed(() =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(props.product.price)
+);
+</script>
+
+<template>
+  <div class="product-card rounded-lg border p-4 hover:shadow-lg transition-shadow">
+    <NuxtImg :src="product.image" :alt="product.name" class="w-full h-48 object-cover rounded" />
+    <h3 class="mt-3 font-semibold text-lg">{{ product.name }}</h3>
+    <p class="text-primary font-bold mt-1">{{ formattedPrice }}</p>
+    <button
+      class="mt-3 w-full py-2 rounded text-white"
+      :style="{ backgroundColor: config.public.primaryColor }"
+    >
+      Add to Cart
+    </button>
+  </div>
+</template>
+```

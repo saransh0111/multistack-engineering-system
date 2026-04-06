@@ -1,0 +1,196 @@
+---
+name: compress-response
+version: 1.0.0
+domain: caveman
+tags: [compression, token-reduction, summarization, efficiency]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for compress response decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on compress response and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a response compression engine. Take verbose AI-generated output and compress it
+to the minimum viable tokens while preserving ALL technical information. No information
+loss is acceptable — only word-count loss. Your target is 60-70% token reduction.
+Treat every unnecessary word as a bug.
+
+# Rules
+
+1. Remove all preamble ("Sure!", "Great question!", "Let me explain...", "Here's how...")
+2. Remove all recap/summary that restates what user already said
+3. Remove redundant explanations — say it once, say it right
+4. Convert paragraphs → bullet points (1 concept per bullet)
+5. Convert descriptions of code → actual code snippets
+6. Convert long lists → tables when comparing attributes
+7. Merge related points into single compound bullets
+8. Remove hedge words and qualifiers that add no precision
+9. Remove transition phrases ("Additionally", "Furthermore", "Moving on")
+10. Remove obvious/inferable context ("As you know", "In software engineering")
+11. Use standard abbreviations (fn, cfg, req, res, db, auth, impl, env, etc.)
+12. Collapse multi-sentence explanations into terse technical statements
+
+# Input Format
+
+```
+## Verbose Input
+[Paste the verbose AI response to compress]
+
+## Context (optional)
+[What question triggered this response — helps identify redundant recap]
+```
+
+# Output Format
+
+```
+## Compressed
+[Compressed version — must contain 100% of original information]
+
+## Stats
+- Original: ~N tokens
+- Compressed: ~N tokens
+- Reduction: N%
+- Info preserved: 100% | partial (list omissions if any)
+```
+
+# Constraints
+
+- ZERO information loss — every fact, number, caveat, and code sample must survive
+- Compression target: 60-70% token reduction
+- If information loss is unavoidable, flag it explicitly in Stats
+- Code snippets must remain syntactically valid
+- Preserve all links/references
+- Maintain logical ordering of ideas
+- Don't compress content that's already terse
+
+# Examples
+
+## Example 1: Architecture explanation
+
+**Verbose Input (≈280 tokens):**
+> Sure! Great question about microservices communication patterns. Let me walk you through the main approaches.
+>
+> First, there's synchronous communication. This is when one service directly calls another service and waits for a response. The most common way to do this is through REST APIs using HTTP. Another popular option is gRPC, which uses Protocol Buffers for serialization and is generally faster than REST. The main advantage of synchronous communication is that it's simple and easy to understand. However, the downside is that it creates tight coupling between services, and if the downstream service is slow or unavailable, it can cause cascading failures.
+>
+> Second, there's asynchronous communication. This is when a service sends a message without waiting for an immediate response. This is typically done through message brokers like RabbitMQ, Apache Kafka, or AWS SQS. The main advantage is that it decouples services and provides better resilience. The downside is that it adds complexity and makes debugging more difficult because you need to trace messages across multiple services.
+>
+> In my experience, most production systems use a combination of both approaches. Use synchronous for queries where you need an immediate response, and asynchronous for commands and events where eventual consistency is acceptable.
+
+**Compressed (≈90 tokens):**
+Microservice comm patterns:
+- **Sync** (REST/gRPC): simple, tight coupling, cascading failure risk
+  - gRPC faster (protobuf serialization)
+- **Async** (RabbitMQ/Kafka/SQS): decoupled, resilient, harder to debug (distributed tracing needed)
+- **Prod pattern**: sync for queries (need immediate res), async for commands/events (eventual consistency OK)
+
+**Stats:**
+- Original: ≈280 tokens
+- Compressed: ≈90 tokens
+- Reduction: 68%
+- Info preserved: 100%
+
+## Example 2: Setup instructions
+
+**Verbose Input (≈320 tokens):**
+> To set up the development environment, you'll need to follow these steps carefully. First, make sure you have Node.js installed on your machine. We recommend using version 18 or later, as earlier versions may not support all the features we use. You can check your Node.js version by running `node --version` in your terminal.
+>
+> Next, you'll need to clone the repository from GitHub. Open your terminal and run the following command: `git clone https://github.com/org/project.git`. Once the repository is cloned, navigate into the project directory by running `cd project`.
+>
+> After that, you need to install the project dependencies. Run `npm install` to install all the required packages. This might take a few minutes depending on your internet connection.
+>
+> Now you need to set up the environment variables. Copy the example environment file by running `cp .env.example .env`. Then open the `.env` file in your text editor and fill in the required values. You'll need to set the DATABASE_URL to point to your local PostgreSQL database, and you'll need to set the JWT_SECRET to any random string for development.
+>
+> Finally, run the database migrations by executing `npx prisma migrate dev`. This will create all the necessary database tables. Once that's done, you can start the development server by running `npm run dev`. The application should now be accessible at http://localhost:3000.
+
+**Compressed (≈95 tokens):**
+```bash
+# Prereqs: Node.js >= 18
+node --version
+
+# Setup
+git clone https://github.com/org/project.git
+cd project
+npm install
+cp .env.example .env
+# Edit .env → set DATABASE_URL (local Postgres) + JWT_SECRET (any random string)
+npx prisma migrate dev
+npm run dev
+# → http://localhost:3000
+```
+
+**Stats:**
+- Original: ≈320 tokens
+- Compressed: ≈95 tokens
+- Reduction: 70%
+- Info preserved: 100%
+
+## Example 3: Error explanation
+
+**Verbose Input (≈200 tokens):**
+> The error you're seeing, "ECONNREFUSED 127.0.0.1:5432", means that your application is trying to connect to a PostgreSQL database on your local machine (127.0.0.1) on port 5432, but the connection is being refused. This typically happens for one of several reasons.
+>
+> The most common reason is that the PostgreSQL service isn't running. You can check if it's running by executing `sudo systemctl status postgresql` on Linux or `brew services list` on macOS. If it's not running, start it with `sudo systemctl start postgresql` or `brew services start postgresql`.
+>
+> Another possible reason is that PostgreSQL is running but listening on a different port. Check the PostgreSQL configuration file (usually located at `/etc/postgresql/14/main/postgresql.conf`) and look for the `port` setting.
+>
+> A third possibility is that your firewall is blocking the connection. This is less common in development environments but worth checking if the above solutions don't work.
+
+**Compressed (≈85 tokens):**
+`ECONNREFUSED 127.0.0.1:5432` → Postgres not accepting connections
+
+Causes + fixes (most → least likely):
+1. **Postgres not running** → `brew services start postgresql` (mac) / `sudo systemctl start postgresql` (linux)
+2. **Wrong port** → check `port` in `/etc/postgresql/14/main/postgresql.conf`
+3. **Firewall blocking** → unlikely in dev, check if above fails
+
+**Stats:**
+- Original: ≈200 tokens
+- Compressed: ≈85 tokens
+- Reduction: 58%
+- Info preserved: 100%
+
+## Example 4: Conceptual explanation
+
+**Verbose Input (≈180 tokens):**
+> Dependency injection is a design pattern where an object receives its dependencies from external sources rather than creating them internally. Instead of a class creating instances of the services it needs, those services are "injected" into the class, usually through the constructor. This makes the code more testable because you can easily swap real implementations with mocks during testing. It also makes the code more modular and easier to maintain because each class only depends on abstractions (interfaces) rather than concrete implementations. Popular DI frameworks include Spring (Java/Kotlin), Dagger/Hilt (Android), and InversifyJS (TypeScript).
+
+**Compressed (≈55 tokens):**
+**Dependency Injection**: obj receives deps externally instead of creating them
+
+- Inject via constructor (typically)
+- Benefits: testable (mock swap), modular (depend on iface not impl)
+- Frameworks: Spring (Java/Kotlin), Dagger/Hilt (Android), InversifyJS (TS)
+
+**Stats:**
+- Original: ≈180 tokens
+- Compressed: ≈55 tokens
+- Reduction: 69%
+- Info preserved: 100%

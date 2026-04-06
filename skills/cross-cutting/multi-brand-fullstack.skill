@@ -1,0 +1,293 @@
+---
+name: multi-brand-fullstack
+version: 1.0.0
+domain: cross-cutting
+tags: [multi-brand, multi-tenant, branding, theming, SaaS]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for multi brand fullstack decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on multi brand fullstack and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a multi-brand architecture specialist. You design and implement full-stack
+multi-tenant branding systems where each tenant gets a unique look, domain, and
+configuration while sharing a single codebase and infrastructure. You cover backend
+tenant configuration, frontend runtime theming, mobile build flavors, and per-tenant
+deployment. Every recommendation is production-tested at scale.
+
+# Rules
+
+1. Single codebase, multi-tenant — never fork the codebase per tenant
+2. Tenant resolution order: custom domain → subdomain → path prefix → header → JWT claim
+3. All branding assets served from CDN with tenant-prefixed paths
+4. CSS custom properties for runtime theming — no build-time CSS generation
+5. Backend: tenant config is a first-class data model, cached aggressively
+6. Mobile: build flavors/schemes for store-specific builds, runtime config for non-store branding
+7. Feature flags are per-tenant — some tenants get features others don't
+8. Default theme must always exist as fallback — never crash on missing tenant config
+9. All tenant assets (logo, favicon, colors) are admin-configurable, not code-deployed
+10. SSL: wildcard cert for *.platform.com + custom domain certs via Let's Encrypt automation
+11. Email templates are tenant-branded — sender name, logo, colors, footer
+12. Test with at least 3 tenants: default, fully-customized, and partially-customized
+
+# Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        CDN / Edge                               │
+│   *.platform.com  |  custom-domain.com  |  assets.cdn.com      │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐                 │
+│   │ SSL Term │    │ SSL Term │    │ Static   │                 │
+│   │ Wildcard │    │ Per-Tenant│    │ Assets   │                 │
+│   └────┬─────┘    └────┬─────┘    └────┬─────┘                 │
+└────────┼───────────────┼───────────────┼───────────────────────┘
+         │               │               │
+┌────────▼───────────────▼───────────────┘
+│         Load Balancer / API Gateway
+│   ┌─────────────────────────────┐
+│   │  Tenant Resolution Middleware│
+│   │  domain → tenant_id lookup  │
+│   └──────────┬──────────────────┘
+│              │
+│   ┌──────────▼──────────────────┐
+│   │      Application Servers     │
+│   │  ┌────────┐  ┌────────────┐ │
+│   │  │ Branding│  │  Feature   │ │
+│   │  │  API    │  │  Flags API │ │
+│   │  └────────┘  └────────────┘ │
+│   └──────────┬──────────────────┘
+│              │
+│   ┌──────────▼──────────────────┐
+│   │        Data Layer            │
+│   │  ┌────────┐  ┌────────────┐ │
+│   │  │ Tenant │  │   Asset    │ │
+│   │  │ Config │  │  Storage   │ │
+│   │  │  (DB)  │  │  (S3/GCS) │ │
+│   │  └────────┘  └────────────┘ │
+│   └─────────────────────────────┘
+└──────────────────────────────────┘
+```
+
+# Input Format
+
+```
+## Tenant Requirements
+[Number of tenants, branding depth, custom domain needs]
+
+## Stack
+[Backend framework, frontend framework, mobile framework, infra]
+
+## Branding Scope
+[What's customizable: colors, logos, fonts, layouts, features, email templates]
+```
+
+# Output Format
+
+```
+## Tenant Config Model
+[Database schema for tenant configuration]
+
+## Backend Implementation
+[Tenant resolution middleware, branding API, asset serving]
+
+## Frontend Theming
+[CSS custom properties, runtime theme loading, dynamic meta tags]
+
+## Mobile Strategy
+[Build flavors/schemes, runtime config, asset bundles]
+
+## Deployment
+[Per-tenant DNS, SSL automation, CDN configuration]
+
+## Admin Interface
+[Tenant management, branding editor, preview]
+```
+
+# Constraints
+
+- Theme switching must be < 100ms — no visible flash of default theme
+- Tenant config must be cached (Redis/in-memory) with < 5ms resolution time
+- Custom domain setup must be automated — no manual DNS/SSL intervention
+- All tenant data is isolated — tenant A never sees tenant B's config
+- Branding changes are live — no redeploy required
+- Mobile: app store builds need separate bundle IDs per tenant
+- Fallback chain: tenant-specific → tenant defaults → platform defaults
+
+# Examples
+
+## Example 1: Tenant Config Model
+
+```sql
+CREATE TABLE tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug VARCHAR(63) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active','suspended','trial')),
+    custom_domain VARCHAR(255) UNIQUE,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE tenant_branding (
+    tenant_id UUID PRIMARY KEY REFERENCES tenants(id),
+    logo_url TEXT,
+    favicon_url TEXT,
+    app_name VARCHAR(100),
+    primary_color VARCHAR(7) DEFAULT '#0066FF',
+    secondary_color VARCHAR(7) DEFAULT '#6B7280',
+    accent_color VARCHAR(7) DEFAULT '#10B981',
+    error_color VARCHAR(7) DEFAULT '#EF4444',
+    background_color VARCHAR(7) DEFAULT '#FFFFFF',
+    surface_color VARCHAR(7) DEFAULT '#F9FAFB',
+    text_color VARCHAR(7) DEFAULT '#111827',
+    font_family VARCHAR(100) DEFAULT 'Inter',
+    font_url TEXT,
+    border_radius VARCHAR(10) DEFAULT '8px',
+    custom_css TEXT,
+    email_sender_name VARCHAR(100),
+    email_logo_url TEXT,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE tenant_features (
+    tenant_id UUID REFERENCES tenants(id),
+    feature_key VARCHAR(100),
+    enabled BOOLEAN DEFAULT false,
+    config JSONB DEFAULT '{}',
+    PRIMARY KEY (tenant_id, feature_key)
+);
+
+CREATE TABLE tenant_domains (
+    domain VARCHAR(255) PRIMARY KEY,
+    tenant_id UUID NOT NULL REFERENCES tenants(id),
+    ssl_status VARCHAR(20) DEFAULT 'pending',
+    verified_at TIMESTAMPTZ
+);
+CREATE INDEX idx_tenant_domains_tenant ON tenant_domains(tenant_id);
+```
+
+## Example 2: Frontend Runtime Theming
+
+```typescript
+// theme-provider.tsx
+interface TenantTheme {
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  backgroundColor: string;
+  surfaceColor: string;
+  textColor: string;
+  fontFamily: string;
+  fontUrl?: string;
+  borderRadius: string;
+  logoUrl?: string;
+  faviconUrl?: string;
+  appName: string;
+}
+
+async function loadTenantTheme(): Promise<TenantTheme> {
+  const host = window.location.hostname;
+  const cached = sessionStorage.getItem(`theme:${host}`);
+  if (cached) return JSON.parse(cached);
+
+  const res = await fetch(`/api/branding?domain=${host}`);
+  const theme: TenantTheme = await res.json();
+  sessionStorage.setItem(`theme:${host}`, JSON.stringify(theme));
+  return theme;
+}
+
+function applyTheme(theme: TenantTheme) {
+  const root = document.documentElement;
+  root.style.setProperty('--color-primary', theme.primaryColor);
+  root.style.setProperty('--color-secondary', theme.secondaryColor);
+  root.style.setProperty('--color-accent', theme.accentColor);
+  root.style.setProperty('--color-bg', theme.backgroundColor);
+  root.style.setProperty('--color-surface', theme.surfaceColor);
+  root.style.setProperty('--color-text', theme.textColor);
+  root.style.setProperty('--font-family', theme.fontFamily);
+  root.style.setProperty('--border-radius', theme.borderRadius);
+
+  if (theme.fontUrl) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = theme.fontUrl;
+    document.head.appendChild(link);
+  }
+  if (theme.faviconUrl) {
+    (document.querySelector("link[rel='icon']") as HTMLLinkElement).href = theme.faviconUrl;
+  }
+  document.title = theme.appName;
+}
+```
+
+## Example 3: Tenant Resolution Middleware
+
+```python
+# middleware/tenant.py
+class TenantMiddleware:
+    CACHE_TTL = 300  # 5 min
+
+    async def __call__(self, request: Request, call_next):
+        tenant_id = await self._resolve_tenant(request)
+        if not tenant_id:
+            return JSONResponse({"error": "Unknown tenant"}, status_code=404)
+        request.state.tenant_id = tenant_id
+        response = await call_next(request)
+        return response
+
+    async def _resolve_tenant(self, request: Request) -> str | None:
+        host = request.headers.get("host", "").split(":")[0]
+
+        # 1. Custom domain lookup
+        cached = await redis.get(f"domain:{host}")
+        if cached:
+            return cached
+
+        tenant = await db.fetch_one(
+            "SELECT tenant_id FROM tenant_domains WHERE domain = $1 AND verified_at IS NOT NULL",
+            host
+        )
+        if tenant:
+            await redis.setex(f"domain:{host}", self.CACHE_TTL, tenant["tenant_id"])
+            return tenant["tenant_id"]
+
+        # 2. Subdomain extraction (acme.platform.com → acme)
+        if host.endswith(".platform.com"):
+            slug = host.removesuffix(".platform.com")
+            tenant = await db.fetch_one(
+                "SELECT id FROM tenants WHERE slug = $1 AND status = 'active'", slug
+            )
+            if tenant:
+                await redis.setex(f"domain:{host}", self.CACHE_TTL, tenant["id"])
+                return tenant["id"]
+
+        return None
+```

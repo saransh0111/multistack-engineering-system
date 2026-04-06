@@ -1,0 +1,66 @@
+---
+name: find-best-library
+version: 2.0.0
+domain: exploration
+description: Find the best-fit library for a technical problem using ecosystem maturity, maintenance quality, and production-readiness criteria.
+tags: [exploration, libraries, evaluation, package-selection]
+---
+
+## Purpose
+Select the strongest library for the job using fit, maturity, risk, and operational cost.
+
+## When to Use
+Use when a build needs a third-party dependency and the choice materially affects delivery speed or long-term maintainability.
+
+## Input Format
+```yaml
+need:
+  problem: string
+  language_or_framework: string
+  must_have_features: string[]
+constraints:
+  license_requirements: string[]
+  bundle_or_binary_sensitivity: boolean
+  maintenance_risk_tolerance: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+recommendation:
+  library: string
+  rationale: string
+evaluation:
+  fit: string
+  maturity: string
+  production_readiness: string
+  risks: string[]
+runner_up:
+  library: string
+  when_better: string
+```
+
+## Execution Logic
+1. Filter candidates by platform and must-have features.
+2. Reject libraries with weak maintenance, unclear licensing, or poor production signals.
+3. Compare API quality, ecosystem fit, migration cost, and operational burden.
+4. Prefer boring, proven options unless the requirement truly needs a niche capability.
+5. Return one recommendation plus one credible alternative.
+
+## Rules
+1. Check release recency, issue health, and maintainer activity.
+2. Favor widely deployed libraries with clear docs and upgrade paths.
+3. Include bundle size or runtime cost when it matters.
+4. Note supply-chain or bus-factor risk.
+5. Tie the choice to the stated use case, not popularity alone.
+
+## Constraints
+- Never recommend a library just because it is trendy.
+- Never ignore maintenance quality.
+- Never omit migration or lock-in cost.
+
+## Examples
+Input: animation library for a Next.js marketing site.
+Output: Framer Motion or GSAP recommendation with fit, performance, and maintenance rationale.
+
+## Output Style
+Return a decision memo with one winner, one runner-up, and explicit risks.

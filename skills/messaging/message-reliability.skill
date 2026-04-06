@@ -1,0 +1,66 @@
+---
+name: message-reliability
+version: 2.0.0
+domain: messaging
+description: Choose acknowledgement, retry, deduplication, dead-letter, and replay strategies for reliable messaging systems.
+tags: [messaging, reliability, retries, dlq, replay]
+---
+
+## Purpose
+Define how messages are delivered, retried, repaired, and audited under failure.
+
+## When to Use
+Use whenever a queue, stream, webhook, or realtime channel carries business-critical messages.
+
+## Input Format
+```yaml
+message_flow:
+  transport: string
+  business_criticality: "low" | "medium" | "high"
+  producer_retry: boolean
+  consumer_retry: boolean
+requirements:
+  duplicate_tolerance: "low" | "medium" | "high"
+  ordering_needs: string
+  max_retry_minutes: number
+```
+
+## Output Format
+```yaml
+reliability_model:
+  acknowledgement: string
+  retry_strategy: string
+  dedupe_strategy: string
+  dlq_policy: string
+repair:
+  replay_process: string
+  operator_actions: string[]
+metrics:
+  - string
+```
+
+## Execution Logic
+1. Identify the failure points: producer, broker, consumer, downstream dependency.
+2. Pick acknowledgement semantics that balance durability and throughput.
+3. IF duplicates are costly, add idempotency and dedupe before expanding retries.
+4. IF poison messages are possible, add DLQ and quarantine review flow.
+5. Return replay process and metrics with the reliability model.
+
+## Rules
+1. Assume at-least-once delivery unless proven otherwise.
+2. Make consumers idempotent before making retries aggressive.
+3. Separate transient retry from permanent failure quarantine.
+4. Include correlation IDs in every message.
+5. Measure age of oldest unprocessed message, failure rate, and replay volume.
+
+## Constraints
+- Never use infinite retries on poison messages.
+- Never hide dropped messages behind log-only handling.
+- Never implement replay without operator visibility.
+
+## Examples
+Input: payment webhook ingestion with third-party retries and internal queue fanout.
+Output: durable ack, dedupe by provider event ID, bounded retries, DLQ, and replay runbook.
+
+## Output Style
+Return a reliability policy with ack, retry, dedupe, and repair steps.

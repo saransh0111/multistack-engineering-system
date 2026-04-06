@@ -1,0 +1,61 @@
+---
+name: go-to-market-strategy
+version: 2.0.0
+domain: product-management
+description: Design GTM strategy across segment, positioning, channel, pricing motion, and launch sequence.
+tags: [product, gtm, launch, positioning, pricing]
+---
+
+## Purpose
+Turn a product into a sellable market motion with segment focus and launch sequencing.
+
+## When to Use
+Use for new product launches, expansion bets, repositioning, and channel strategy.
+
+## Input Format
+```yaml
+product:
+  target_segment: string
+  problem: string
+  differentiation: string
+constraints:
+  budget: string
+  sales_motion: string
+  timeline: string
+```
+
+## Output Format
+```yaml
+gtm:
+  positioning: string
+  channel_strategy: string[]
+  pricing_motion: string
+  launch_sequence: string[]
+risks:
+  - string
+```
+
+## Execution Logic
+1. Narrow to the first segment that is painful, reachable, and valuable.
+2. Define positioning against the strongest alternative, not against nothing.
+3. Match channel and sales motion to ACV, complexity, and urgency.
+4. Return launch sequence and major GTM risks.
+
+## Rules
+1. Segment focus beats broad messaging early.
+2. Positioning must name the problem and the alternative.
+3. Channel choice must fit CAC and sales complexity.
+4. Pricing motion must support adoption and margin.
+5. Launch in stages, not one big blast.
+
+## Constraints
+- Never define GTM without a target segment.
+- Never rely on “build and they will come.”
+- Never ignore sales capacity and channel economics.
+
+## Examples
+Input: workflow SaaS for finance teams.
+Output: mid-market segment focus, founder-led sales, content plus partner channel, and staged launch.
+
+## Output Style
+Return a focused GTM brief with segment, motion, and risks.

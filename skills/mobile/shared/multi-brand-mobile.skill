@@ -1,0 +1,591 @@
+---
+name: Multi-Brand Mobile App Architecture
+version: 2.0.0
+domain: mobile/shared
+tags: [multi-brand, product-flavors, multi-target, branding, theming, firebase, cocoapods, plist]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for multi brand mobile decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on multi brand mobile and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior mobile architect building multi-brand app platforms. On Android you use
+productFlavors with a "brand" dimension to produce multiple branded APKs/AABs from a single
+codebase — each flavor defines its own applicationId, colors (resValue), strings, domain,
+and optional cloud resource identifiers. On iOS you use multiple Xcode targets sharing Swift
+source via CocoaPods `shared_pods`, with brand-specific properties loaded from per-bundle-ID
+plists via BrandPropertiesController and theming via ThemePropertiesController. Firebase is
+configured per brand: per-flavor `google-services.json` (Android) and per-target plist
+selection at startup (iOS).
+
+# Team Patterns
+
+## Android (typical)
+
+```
+Approach:  productFlavors with dimension "brand" in build.gradle.kts
+Flavors:   brandMain, brandAlt, brandPartner, + others
+Per-flavor: applicationId, resValue (colors, strings), buildConfigField (DEEPLINK_ID, domain)
+Build:     debug → staging BASE_URL, release → production BASE_URL
+Batch:     ./gradlew bundleAllRelease
+Naming:    {flavor}-{buildType}-v{version}.apk
+```
+
+## iOS (typical)
+
+```
+Approach:  Multiple Xcode targets (one per brand) in one project
+Sharing:   CocoaPods shared_pods across targets
+Branding:  BrandPropertiesController loads Branding/{bundleID}.plist
+Theming:   ThemePropertiesController reads brand plist for colors/fonts
+Firebase:  Select GoogleService-Info-*.plist by bundle ID at startup
+```
+
+# Rules
+
+## 1. Android: productFlavors — brand injection via resValue and buildConfigField
+
+```kotlin
+// app/build.gradle.kts — excerpt
+android {
+    flavorDimensions += "brand"
+
+    productFlavors {
+        create("brandMain") {
+            dimension = "brand"
+            applicationId = "com.example.branda"
+            resValue("color", "colorPrimary", "#2962FF")
+            resValue("color", "colorPrimaryDark", "#0039CB")
+            resValue("color", "colorAccent", "#448AFF")
+            resValue("string", "app_name", "Example App")
+            resValue("string", "domain", "example.com")
+            buildConfigField("String", "ARN_LIST", "\"deeplinkId:aws:sns:ap-south-1:...:brandMain\"")
+        }
+        create("brandAlt") {
+            dimension = "brand"
+            applicationId = "com.example.brandd"
+            resValue("color", "colorPrimary", "#FF6D00")
+            resValue("color", "colorPrimaryDark", "#C43E00")
+            resValue("color", "colorAccent", "#FFAB40")
+            resValue("string", "app_name", "Brand Alt")
+            resValue("string", "domain", "brandalt.example.com")
+            buildConfigField("String", "ARN_LIST", "\"deeplinkId:aws:sns:REGION:ACCOUNT:brandAlt\"")
+        }
+        create("brandPartner") {
+            dimension = "brand"
+            applicationId = "com.example.brandc"
+            resValue("color", "colorPrimary", "#1B5E20")
+            resValue("color", "colorPrimaryDark", "#003300")
+            resValue("color", "colorAccent", "#66BB6A")
+            resValue("string", "app_name", "Brand Partner")
+            resValue("string", "domain", "brandpartner.example.com")
+            buildConfigField("String", "ARN_LIST", "\"deeplinkId:aws:sns:REGION:ACCOUNT:brandPartner\"")
+        }
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField("String", "BASE_URL", "\"https://staging-api.example.com/\"")
+        }
+        release {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("String", "BASE_URL", "\"https://api.example.com/\"")
+        }
+    }
+}
+```
+
+How this works at compile time:
+- `resValue("color", ...)` generates `res/values/generated.xml` with color resources
+- `resValue("string", "app_name", ...)` overrides `@string/app_name` used in AndroidManifest
+- `buildConfigField(...)` generates `BuildConfig.ARN_LIST`, `BuildConfig.BASE_URL`
+- Each flavor variant combines: flavor config + build type config
+
+## 2. Android: Consuming brand values in code
+
+```kotlin
+// Colors come from generated resources — use R.color.colorPrimary in XML / code
+// Strings come from generated resources — @string/app_name in AndroidManifest
+// Domain and DEEPLINK_ID are accessed via BuildConfig:
+
+class ApiService @Inject constructor(
+    private val retrofit: Retrofit
+) {
+    // Retrofit base URL is BuildConfig.BASE_URL, set per build type
+    // Brand-specific domain available via R.string.domain or resValue
+}
+
+// In themes.xml, reference the generated colors:
+// <item name="colorPrimary">@color/colorPrimary</item>
+// <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+// <item name="colorAccent">@color/colorAccent</item>
+```
+
+## 3. Android: Custom APK/AAB naming
+
+```kotlin
+// app/build.gradle.kts
+android {
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val flavor = variant.productFlavors[0].name
+            val buildType = variant.buildType.name
+            val versionName = variant.versionName
+            output.outputFileName = "${flavor}-${buildType}-v${versionName}.apk"
+        }
+    }
+}
+
+// Output examples:
+//   brandMain-release-v2.4.1.apk
+//   brandAlt-debug-v2.4.1.apk
+//   brandPartner-release-v2.4.1.apk
+```
+
+## 4. Android: Batch release builds
+
+```kotlin
+// app/build.gradle.kts
+tasks.register("bundleAllRelease") {
+    dependsOn(
+        "bundleBrandMainRelease",
+        "bundleBrandAltRelease",
+        "bundleBrandPartnerRelease"
+    )
+}
+```
+
+```bash
+# Build all brand AABs in one command
+./gradlew bundleAllRelease
+
+# Build a single brand
+./gradlew bundleBrandMainRelease
+./gradlew assembleBrandAltDebug
+```
+
+## 5. Android: Per-flavor Firebase config
+
+```
+app/
+├── src/
+│   ├── main/                     (shared source, layouts, common resources)
+│   ├── brandMain/
+│   │   ├── google-services.json  (Firebase project for brandMain)
+│   │   └── res/
+│   │       ├── drawable/         (brand launcher, splash)
+│   │       └── mipmap-*/         (brand launcher icons)
+│   ├── brandAlt/
+│   │   ├── google-services.json  (Firebase project for brandAlt)
+│   │   └── res/
+│   └── brandPartner/
+│       ├── google-services.json  (Firebase project for brandPartner)
+│       └── res/
+```
+
+The Google Services Gradle plugin (`com.google.gms.google-services`) resolves the correct
+`google-services.json` based on the active flavor directory.
+
+## 6. iOS: CocoaPods shared_pods across brand targets
+
+```ruby
+# Podfile — excerpt
+platform :ios, '14.0'
+
+def shared_pods
+  pod 'Alamofire', '~> 5.9'
+  pod 'Kingfisher', '~> 7.0'
+  pod 'Firebase/Analytics'
+  pod 'Firebase/Crashlytics'
+  pod 'Firebase/Messaging'
+  pod 'SnapKit', '~> 5.7'
+  pod 'IQKeyboardManagerSwift'
+end
+
+target 'MainApp' do
+  use_frameworks!
+  shared_pods
+end
+
+target 'BrandB' do
+  use_frameworks!
+  shared_pods
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+    end
+  end
+end
+```
+
+All targets compile the same Swift source files. Brand differentiation comes entirely from:
+- Bundle identifier (set per target in Xcode)
+- Brand plist (loaded at runtime by BrandPropertiesController)
+- Firebase plist (selected at runtime by Firebase-Config.swift)
+
+## 7. iOS: BrandPropertiesController — plist-based brand injection
+
+```swift
+// BrandPropertiesController.swift — excerpt
+class BrandPropertiesController {
+    static let shared = BrandPropertiesController()
+
+    private var properties: [String: Any] = [:]
+
+    private init() {
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        if let path = Bundle.main.path(forResource: bundleID, ofType: "plist"),
+           let dict = NSDictionary(contentsOfFile: path) as? [String: Any] {
+            properties = dict
+        }
+    }
+
+    var appName: String {
+        properties["AppName"] as? String ?? ""
+    }
+
+    var baseURL: String {
+        properties["BaseURL"] as? String ?? ""
+    }
+
+    var primaryColor: String {
+        properties["PrimaryColor"] as? String ?? "#000000"
+    }
+
+    var secondaryColor: String {
+        properties["SecondaryColor"] as? String ?? "#333333"
+    }
+
+    var supportEmail: String {
+        properties["SupportEmail"] as? String ?? ""
+    }
+
+    var termsURL: String {
+        properties["TermsURL"] as? String ?? ""
+    }
+
+    var privacyURL: String {
+        properties["PrivacyURL"] as? String ?? ""
+    }
+
+    var domain: String {
+        properties["Domain"] as? String ?? ""
+    }
+
+    var arnList: [String] {
+        properties["ARNList"] as? [String] ?? []
+    }
+}
+```
+
+How the plist lookup works:
+1. `Bundle.main.bundleIdentifier` returns the active target's bundle ID (e.g., `"com.example.main"`)
+2. `Bundle.main.path(forResource: bundleID, ofType: "plist")` finds `Branding/com.example.main.plist`
+3. All brand-specific values (colors, URLs, strings) are read from this single plist
+
+Project structure:
+
+```
+Branding/
+├── com.example.main.plist
+│   → AppName: "Main Brand"
+│   → BaseURL: "https://api.example.com"
+│   → PrimaryColor: "#2962FF"
+│   → Domain: "example.com"
+│   → ARNList: [...]
+│
+├── com.example.brandc.plist
+│   → AppName: "Partner Brand"
+│   → BaseURL: "https://api.partner.example.com"
+│   → PrimaryColor: "#1B5E20"
+│   → Domain: "partner.example.com"
+│   → ARNList: [...]
+│
+└── ...
+
+Config/
+├── Info-Main.plist             (target-specific Info.plist)
+├── Info-BrandB.plist
+└── ...
+```
+
+## 8. iOS: ThemePropertiesController — runtime theming from brand plist
+
+```swift
+// ThemePropertiesController.swift — excerpt
+class ThemePropertiesController {
+    static let shared = ThemePropertiesController()
+
+    private let brand = BrandPropertiesController.shared
+
+    var primaryColor: UIColor {
+        UIColor(hex: brand.primaryColor)
+    }
+
+    var secondaryColor: UIColor {
+        UIColor(hex: brand.secondaryColor)
+    }
+
+    var navigationBarColor: UIColor {
+        primaryColor
+    }
+
+    var fontName: String {
+        brand.properties["FontName"] as? String ?? "System"
+    }
+
+    func applyGlobalAppearance() {
+        UINavigationBar.appearance().barTintColor = navigationBarColor
+        UINavigationBar.appearance().tintColor = .white
+        UINavigationBar.appearance().isTranslucent = false
+        UINavigationBar.appearance().titleTextAttributes = [
+            .foregroundColor: UIColor.white
+        ]
+        UITabBar.appearance().tintColor = primaryColor
+    }
+}
+```
+
+Called in `AppDelegate.didFinishLaunchingWithOptions`:
+
+```swift
+func application(_ application: UIApplication,
+                 didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    ThemePropertiesController.shared.applyGlobalAppearance()
+    configureFirebase()
+    // ...
+    return true
+}
+```
+
+## 9. iOS: Firebase plist selection per brand target
+
+```swift
+// Firebase-Config.swift — excerpt
+import FirebaseCore
+
+func configureFirebase() {
+    let bundleID = Bundle.main.bundleIdentifier ?? ""
+    let plistName: String
+
+    switch bundleID {
+    case "com.example.main":
+        plistName = "GoogleService-Info-Main"
+    case "com.example.brandc":
+        plistName = "GoogleService-Info-BrandBServices"
+    default:
+        plistName = "GoogleService-Info"
+    }
+
+    guard let path = Bundle.main.path(forResource: plistName, ofType: "plist"),
+          let options = FirebaseOptions(contentsOfFile: path) else {
+        fatalError("Firebase config not found: \(plistName).plist")
+    }
+    FirebaseApp.configure(options: options)
+}
+```
+
+Firebase plist file structure:
+
+```
+Firebase-Config/
+├── GoogleService-Info-Main.plist
+├── GoogleService-Info-BrandBServices.plist
+└── ...
+```
+
+Each plist points to a different Firebase project, ensuring analytics, crashlytics,
+and push notifications are isolated per brand.
+
+## 10. iOS vs Android: Brand injection comparison
+
+```
+┌────────────────────┬────────────────────────────────┬──────────────────────────────────┐
+│ Concern            │ Android (multi-flavor)          │ iOS (multi-target)                         │
+├────────────────────┼────────────────────────────────┼──────────────────────────────────┤
+│ Variant mechanism  │ productFlavors (brand dim)      │ Xcode targets (one per brand)    │
+│ App identity       │ applicationId per flavor         │ Bundle ID per target             │
+│ Colors             │ resValue("color", ...) in       │ BrandPropertiesController +      │
+│                    │ build.gradle.kts                 │ ThemePropertiesController        │
+│ Strings            │ resValue("string", ...) in      │ Brand plist keys                 │
+│                    │ build.gradle.kts                 │                                  │
+│ Domain / URLs      │ buildConfigField in flavor +    │ Brand plist BaseURL key           │
+│                    │ BASE_URL in buildType            │                                  │
+│ Firebase           │ Per-flavor google-services.json  │ Per-target plist, switch on       │
+│                    │ in src/{flavor}/                 │ bundleID in Firebase-Config.swift │
+│ Dependency sharing │ Single build.gradle.kts          │ CocoaPods shared_pods method     │
+│ Batch build        │ ./gradlew bundleAllRelease       │ Build each target/scheme          │
+│ DI                 │ Hilt                             │ N/A (no DI framework)            │
+└────────────────────┴────────────────────────────────┴──────────────────────────────────┘
+```
+
+## 11. Adding a new brand — step by step
+
+### Android (productFlavors)
+
+```
+1. Add a new productFlavor in app/build.gradle.kts:
+     create("newBrand") {
+         dimension = "brand"
+         applicationId = "com.newbrand.app"
+         resValue("color", "colorPrimary", "#HEXVAL")
+         resValue("string", "app_name", "New Brand")
+         resValue("string", "domain", "newbrand.com")
+         buildConfigField("String", "ARN_LIST", "\"deeplinkId:...\"")
+     }
+
+2. Create src/newBrand/ directory with:
+     google-services.json   (from Firebase console)
+     res/drawable/           (brand launcher/splash)
+     res/mipmap-*/           (launcher icons)
+
+3. Add to bundleAllRelease task:
+     dependsOn("bundleNewBrandRelease")
+
+4. Sync Gradle and build:
+     ./gradlew assembleNewBrandDebug
+```
+
+### iOS (multi-target)
+
+```
+1. Duplicate an existing target in Xcode (e.g., MainApp → NewBrand)
+2. Set new bundle identifier: com.newbrand.app
+3. Create Branding/com.newbrand.app.plist with brand properties
+4. Add GoogleService-Info-NewBrand.plist to Firebase-Config/
+5. Update Firebase-Config.swift switch:
+     case "com.newbrand.app":
+         plistName = "GoogleService-Info-NewBrand"
+6. Add target to Podfile:
+     target 'NewBrand' do
+       use_frameworks!
+       shared_pods
+     end
+7. Run: pod install
+8. Create Config/Info-NewBrand.plist
+```
+
+## 12. Flutter: Generic multi-brand patterns
+
+These patterns align with the Android/iOS approach if you ship Flutter alongside native:
+
+```dart
+// lib/config/brand_config.dart
+class BrandConfig {
+  final String brandId;
+  final String appName;
+  final Color primaryColor;
+  final String apiBaseUrl;
+  final String domain;
+
+  const BrandConfig({
+    required this.brandId,
+    required this.appName,
+    required this.primaryColor,
+    required this.apiBaseUrl,
+    required this.domain,
+  });
+}
+```
+
+```dart
+// lib/brands/brands.dart
+const brands = {
+  'brand_a': BrandConfig(
+    brandId: 'brand_a',
+    appName: 'Brand A',
+    primaryColor: Color(0xFF2962FF),
+    apiBaseUrl: 'https://api.branda.com',
+    domain: 'branda.com',
+  ),
+  'brand_b': BrandConfig(
+    brandId: 'brand_b',
+    appName: 'Brand B',
+    primaryColor: Color(0xFFFF6D00),
+    apiBaseUrl: 'https://api.brandb.com',
+    domain: 'brandb.com',
+  ),
+};
+```
+
+```bash
+flutter run --flavor brand_a -t lib/main_brand_a.dart --dart-define=BRAND=brand_a
+```
+
+# Input Format
+
+```
+Brand: [brand name — e.g., brandMain, brandPartner]
+Platform: [Android / iOS]
+Action: [add-brand / update-brand / configure-firebase / build]
+```
+
+# Output Format
+
+```
+// MARK: - Android
+// build.gradle.kts — productFlavor with brand dimension
+// resValue for colors/strings, buildConfigField for domain/DEEPLINK_ID/BASE_URL
+// src/{flavor}/google-services.json
+
+// MARK: - iOS
+// Podfile — shared_pods with new target
+// Branding/{bundleID}.plist — brand properties
+// Firebase-Config.swift — plist selection by bundleID
+// ThemePropertiesController — colors/fonts from brand plist
+// Config/Info-{Brand}.plist — target-specific Info.plist
+
+// MARK: - Flutter (generic)
+// lib/config/brand_config.dart
+// Per-brand entry points
+```
+
+# Constraints
+
+- Brand config on iOS MUST be loaded via `BrandPropertiesController.shared` from `Bundle.main.path(forResource: bundleID, ofType: "plist")`.
+- Theme colors on iOS MUST flow through `ThemePropertiesController.shared` which reads from `BrandPropertiesController`.
+- Android brand differentiation MUST use `resValue` (colors, strings) and `buildConfigField` (domain, DEEPLINK_ID) in `productFlavors`.
+- Android flavor dimension MUST be `"brand"`, not `"environment"`.
+- Firebase on Android MUST use per-flavor `google-services.json` under `src/{flavorName}/`.
+- Firebase on iOS MUST use per-brand plist files selected by bundle ID in `Firebase-Config.swift`.
+- iOS targets MUST share dependencies via CocoaPods `shared_pods` method; never duplicate pod declarations per target.
+- BASE_URL on Android comes from `buildTypes` (debug/release), NOT from `productFlavors`.
+- Adding a new Android brand requires: flavor definition + `src/{flavor}/` directory + `google-services.json` + update `bundleAllRelease`.
+- Adding a new iOS brand requires: Xcode target + brand plist + Firebase plist + Podfile target + `Firebase-Config.swift` update.
+- Shared core code MUST NOT import brand-specific resources; brand differentiation flows through generated resources (Android) or plist lookups (iOS).
+- Flutter patterns stay generic unless you standardize on a specific flavor tool.

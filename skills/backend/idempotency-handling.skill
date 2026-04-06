@@ -1,0 +1,72 @@
+---
+name: idempotency-handling
+version: 2.0.0
+domain: backend
+description: Standardize idempotency keys, replay-safe endpoints, message deduplication, and side-effect control for APIs and event consumers.
+tags: [backend, idempotency, api, retries, deduplication, payments]
+---
+
+## Purpose
+Design replay-safe write paths for APIs, jobs, and event consumers so retries never create duplicate business effects.
+
+## When to Use
+Use for any non-read operation that can be retried by clients, queues, schedulers, or operators.
+
+## Input Format
+```yaml
+operation:
+  channel: "http" | "queue" | "cron" | "webhook"
+  action: string
+  side_effects: string[]
+  caller: string
+requirements:
+  retry_window_minutes: number
+  response_reuse: boolean
+  exactly_once_needed: boolean
+storage:
+  primary_store: string
+  ttl_supported: boolean
+```
+
+## Output Format
+```yaml
+strategy:
+  key_source: string
+  dedupe_store: string
+  ttl: string
+  response_policy: "reuse" | "recompute"
+write_path:
+  reservation_step: string
+  state_machine: string[]
+failure_cases:
+  - case: string
+    handling: string
+observability:
+  metrics: string[]
+```
+
+## Execution Logic
+1. Identify the retry source and the business artifact that must remain unique.
+2. IF the channel is HTTP POST or webhook, require an explicit idempotency key or derive one from a trusted external event ID.
+3. IF the consumer is queue-based, use message ID plus business key deduplication.
+4. IF the effect is non-reversible, store the original canonical response and return it on replay.
+5. Define lock, reservation, and finalization states to prevent concurrent duplicate execution.
+
+## Rules
+1. Idempotency keys must be scoped to operation type and tenant, not just raw request ID.
+2. Store terminal outcome with enough payload to answer safe retries.
+3. Deduplication must happen before external side effects fire.
+4. Expiry must exceed the practical retry window plus operator replay buffer.
+5. Record `first_seen_at`, `last_seen_at`, and replay count for fraud and debugging.
+
+## Constraints
+- Never rely on application memory for deduplication.
+- Never confuse idempotency with mutual exclusion; handle concurrent in-flight requests separately.
+- Never promise exactly-once delivery; design effectively-once outcomes instead.
+
+## Examples
+Input: payment capture endpoint retried by mobile clients.
+Output: key from `tenant_id + payment_intent_id`, durable dedupe row, response reuse, and duplicate metric alerts.
+
+## Output Style
+Return a deterministic write path and replay policy with storage choices and failure cases.

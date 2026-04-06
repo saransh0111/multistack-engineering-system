@@ -1,0 +1,72 @@
+---
+name: frontend-theming-system
+version: 2.0.0
+domain: frontend
+description: Design token-driven theming systems for multi-brand, marketing, and application surfaces with accessible palettes, typography, and runtime switching.
+tags: [frontend, theming, design-tokens, multi-brand, typography, palette, runtime-theme]
+---
+
+## Purpose
+Create frontend theme systems that produce distinct, high-quality visual languages without sacrificing maintainability, accessibility, or runtime flexibility.
+
+## When to Use
+Use when building a design system, rebranding a product, supporting multiple brands, or aligning marketing and app surfaces under one token model.
+
+## Input Format
+```yaml
+product:
+  surface: "marketing" | "dashboard" | "hybrid" | "design-system"
+  existing_brand: boolean
+  brand_personality: string
+requirements:
+  themes: string[]
+  multi_brand: boolean
+  dark_mode: boolean
+  accessibility_target: "AA" | "AAA"
+delivery:
+  styling_system: "tailwind" | "css-modules" | "vanilla-extract" | "styled-components"
+  runtime_switching: boolean
+```
+
+## Output Format
+```yaml
+theme_architecture:
+  token_layers: string[]
+  typography_system: string[]
+  palette_strategy: string[]
+  component_state_model: string[]
+runtime_plan:
+  switching: string
+  persistence: string
+  fallback: string
+validation:
+  accessibility_checks: string[]
+  visual_regression: string[]
+```
+
+## Execution Logic
+1. Determine whether the theme is for marketing, product UI, or both.
+2. Pick a visual archetype and derive typography and palette from that archetype rather than defaulting to generic SaaS tokens.
+3. Build token layers: primitive, semantic, component.
+4. IF multiple brands are required, separate shared structure tokens from brand tokens.
+5. IF dark mode is required, design it intentionally rather than inverting colors.
+6. Return runtime switching plus validation steps.
+
+## Rules
+1. Typography is part of the theme system, not an afterthought.
+2. Never default to `Inter` unless the existing brand already uses it.
+3. Semantic tokens must drive components; components must not consume raw palette values directly.
+4. Focus rings, chart colors, error states, and disabled states must all be tokenized.
+5. Multi-brand systems must swap themes without changing component logic.
+
+## Constraints
+- Never treat dark mode as a simple inversion layer.
+- Never store brand logic inside individual components.
+- Never choose accent colors that fail contrast on common states.
+
+## Examples
+Input: multi-brand B2B platform with a premium marketing site and a dense dashboard.
+Output: shared spacing and component tokens, separate marketing and app typography, per-brand accent sets, and runtime theme switching.
+
+## Output Style
+Return a design-system architecture brief with token layers, brand strategy, and validation gates.

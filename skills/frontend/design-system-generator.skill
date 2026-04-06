@@ -1,0 +1,89 @@
+---
+name: design-system-generator
+version: 2.0.0
+domain: frontend
+description: Generate a complete frontend design system including pattern, style family, palette, typography, effects, anti-patterns, and pre-delivery checks.
+tags: [frontend, design-system, ui, ux, design-direction, generator]
+---
+
+## Purpose
+Generate a complete design system package for a product or page so implementation starts from a coherent visual system instead of generic defaults.
+
+## When to Use
+Use when a frontend project needs a fresh design direction, a branded system, or a complete visual operating model before implementation.
+
+## Input Format
+```yaml
+product:
+  name: string
+  category: string
+  audience: string
+  surface: "landing-page" | "dashboard" | "hybrid" | "app-shell" | "design-system"
+requirements:
+  trust_level: "low" | "medium" | "high"
+  content_density: "low" | "medium" | "high"
+  data_visualization: boolean
+  accessibility_target: "AA" | "AAA"
+  motion_level: "none" | "subtle" | "expressive" | "cinematic"
+constraints:
+  existing_brand_assets: boolean
+  dark_mode: boolean
+  mobile_priority: boolean
+```
+
+## Output Format
+```yaml
+design_system:
+  pattern: string
+  style_family: string
+  conversion_or_usage_model: string
+  memorable_hook: string
+  sections: string[]
+visual_language:
+  palette:
+    primary: string
+    secondary: string
+    accent: string
+    background: string
+    text: string
+  typography:
+    display: string
+    body: string
+    mood: string
+  effects: string[]
+  chart_style: string[]
+anti_patterns:
+  - string
+pre_delivery_checklist:
+  - string
+implementation_hints:
+  tokens: string[]
+  component_tone: string[]
+```
+
+## Execution Logic
+1. Detect the product category and whether trust, conversion, exploration, or analysis is the primary goal.
+2. IF the surface is a landing page, choose a landing-page pattern such as hero-centric, trust-and-authority, social-proof-focused, feature-rich showcase, or storytelling-driven.
+3. IF the surface is a dashboard, choose a dashboard pattern such as executive, real-time monitoring, data-dense, comparative analysis, predictive analytics, or financial.
+4. Choose one style family, one palette mood, and one typography pairing that fit the product and audience.
+5. Generate anti-patterns that are especially dangerous for that category.
+6. Produce a pre-delivery checklist covering responsiveness, focus, motion, accessibility, and visual polish.
+
+## Rules
+1. The output must feel tailored to the product category, not generic.
+2. Trust-heavy industries such as finance, healthcare, and enterprise require disciplined contrast, restrained motion, and high-legibility typography.
+3. Creative or consumer categories may use more expressive style families, but readability and hierarchy still come first.
+4. Every design system output needs one memorable hook.
+5. Always include anti-patterns and a pre-delivery checklist.
+
+## Constraints
+- Never output a vague “modern clean UI” system.
+- Never recommend style families that conflict with the product’s trust requirements.
+- Never omit accessibility and responsive validation.
+
+## Examples
+Input: fintech dashboard for CFOs.
+Output: executive dashboard pattern, disciplined financial palette, tabular-numeric typography, restrained interaction model, finance-specific anti-patterns, and pre-delivery checks.
+
+## Output Style
+Return a compact but complete design system package with explicit choices and no filler.

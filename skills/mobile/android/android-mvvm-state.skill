@@ -1,0 +1,573 @@
+---
+name: android-mvvm-state
+version: 2.0.0
+domain: mobile/android
+tags: [mvvm, state-management, viewmodel, livedata, resource, stateflow, kotlin, viewbinding]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android mvvm state decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android mvvm state and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android engineer specializing in MVVM state management for Kotlin Android apps using XML Views + ViewBinding. The repository standard is MVVM with StateFlow preferred for all new ViewModels, including network-backed state when you control both the ViewModel and the observing UI. LiveData is legacy interoperability only and may remain on existing screens until they are migrated. There is NO unified MVI or sealed UiState mandate — multiple StateFlow fields are acceptable when they keep the screen logic clear. Base classes provide `setupUI()` / `setupObservers()` template methods. Legacy LiveData examples below are migration reference, not the default for new output.
+
+# Rules
+
+## 1. Resource<T> is the state wrapper — Status enum with hasBeenHandled for one-shot events
+
+```kotlin
+// utils/Resource.kt
+package com.example.myapp.utils
+
+data class Resource<out T>(
+    val status: Status,
+    val data: T?,
+    val message: String?,
+) {
+    private var hasBeenHandled = false
+
+    fun isResponseHandled(): Boolean {
+        return if (hasBeenHandled) {
+            true
+        } else {
+            hasBeenHandled = true
+            false
+        }
+    }
+
+    companion object {
+        fun <T> success(data: T): Resource<T> =
+            Resource(Status.SUCCESS, data, null)
+
+        fun <T> error(message: String?, data: T? = null): Resource<T> =
+            Resource(Status.ERROR, data, message)
+
+        fun <T> loading(data: T? = null): Resource<T> =
+            Resource(Status.LOADING, data, null)
+    }
+}
+
+enum class Status {
+    SUCCESS,
+    ERROR,
+    LOADING,
+}
+```
+
+## 2. StateFlow is the preferred pattern for new UI state
+
+New ViewModels should expose `StateFlow<Resource<T>>` or narrow typed StateFlows. There is no requirement to force everything into one UiState data class.
+
+```kotlin
+// presentation/viewmodel/PortfolioViewModel.kt
+package com.example.myapp.presentation.viewmodel
+
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.myapp.data.repository.PortfolioRepository
+import com.example.myapp.domain.model.AccountSummary
+import com.example.myapp.domain.model.Transaction
+import com.example.myapp.utils.Resource
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class PortfolioViewModel @Inject constructor(
+    private val portfolioRepository: PortfolioRepository,
+) : ViewModel() {
+
+    private val _portfolio = MutableLiveData<Resource<AccountSummary>>()
+    val accountSummary: LiveData<Resource<AccountSummary>> = _portfolio
+
+    private val _transactions = MutableLiveData<Resource<List<Transaction>>>()
+    val transactions: LiveData<Resource<List<Transaction>>> = _transactions
+
+    private val _redeemResult = MutableLiveData<Resource<String>>()
+    val redeemResult: LiveData<Resource<String>> = _redeemResult
+
+    fun loadPortfolio() {
+        _portfolio.value = Resource.loading()
+        viewModelScope.launch {
+            _portfolio.value = portfolioRepository.getPortfolio()
+        }
+    }
+
+    fun loadTransactions(itemId: String) {
+        _transactions.value = Resource.loading()
+        viewModelScope.launch {
+            _transactions.value = portfolioRepository.getTransactions(itemId)
+        }
+    }
+
+    fun redeemFund(itemId: String, units: Double) {
+        _redeemResult.value = Resource.loading()
+        viewModelScope.launch {
+            _redeemResult.value = portfolioRepository.redeemFund(itemId, units)
+        }
+    }
+}
+```
+
+## 3. BaseFragment provides setupUI() / setupObservers() template with ViewBinding
+
+```kotlin
+// presentation/base/BaseFragment.kt
+package com.example.myapp.presentation.base
+
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import androidx.fragment.app.Fragment
+import androidx.viewbinding.ViewBinding
+
+abstract class BaseFragment<VB : ViewBinding>(
+    private val bindingInflater: (LayoutInflater, ViewGroup?, Boolean) -> VB,
+) : Fragment() {
+
+    private var _binding: VB? = null
+    protected val binding get() = _binding!!
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?,
+    ): View {
+        _binding = bindingInflater(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        setupUI()
+        setupObservers()
+    }
+
+    abstract fun setupUI()
+    abstract fun setupObservers()
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+}
+```
+
+## 4. BaseActivity injects NetworkConnectivityManager and handles offline state
+
+```kotlin
+// presentation/base/BaseActivity.kt
+package com.example.myapp.presentation.base
+
+import android.content.Intent
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import androidx.viewbinding.ViewBinding
+import com.example.myapp.core.utils.network.NetworkConnectivityManager
+import com.example.myapp.presentation.ui.activities.NoInternetActivity
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+abstract class BaseActivity<VB : ViewBinding> : AppCompatActivity() {
+
+    @Inject
+    lateinit var networkConnectivityManager: NetworkConnectivityManager
+
+    protected abstract val binding: VB
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(binding.root)
+        observeConnectivity()
+    }
+
+    private fun observeConnectivity() {
+        lifecycleScope.launch {
+            networkConnectivityManager.showOfflineScreen.collectLatest { showOffline ->
+                if (showOffline) {
+                    startActivity(Intent(this@BaseActivity, NoInternetActivity::class.java))
+                }
+            }
+        }
+    }
+}
+```
+
+Note: `MainActivity` extends `AppCompatActivity` directly (NOT `BaseActivity`) because it hosts the NavHostFragment and bottom navigation.
+
+## 5. Fragments observe LiveData with the Resource status pattern
+
+```kotlin
+// presentation/ui/fragments/home/HomeFragment.kt
+package com.example.myapp.presentation.ui.fragments.home
+
+import androidx.fragment.app.viewModels
+import com.example.myapp.databinding.FragmentHomeBinding
+import com.example.myapp.presentation.base.BaseFragment
+import com.example.myapp.presentation.viewmodel.HomeViewModel
+import com.example.myapp.utils.Status
+import dagger.hilt.android.AndroidEntryPoint
+
+@AndroidEntryPoint
+class HomeFragment :
+    BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::inflate) {
+
+    private val viewModel: HomeViewModel by viewModels()
+
+    override fun setupUI() {
+        binding.swipeRefresh.setOnRefreshListener {
+            viewModel.loadFunds()
+        }
+    }
+
+    override fun setupObservers() {
+        viewModel.items.observe(viewLifecycleOwner) { resource ->
+            when (resource.status) {
+                Status.LOADING -> {
+                    binding.progressBar.show()
+                    binding.errorLayout.hide()
+                }
+                Status.SUCCESS -> {
+                    binding.progressBar.hide()
+                    binding.swipeRefresh.isRefreshing = false
+                    resource.data?.let { items ->
+                        fundAdapter.submitList(items)
+                    }
+                }
+                Status.ERROR -> {
+                    binding.progressBar.hide()
+                    binding.swipeRefresh.isRefreshing = false
+                    binding.errorText.text = resource.message
+                    binding.errorLayout.show()
+                }
+            }
+        }
+
+        viewModel.accountSummary.observe(viewLifecycleOwner) { resource ->
+            when (resource.status) {
+                Status.LOADING -> binding.portfolioShimmer.startShimmer()
+                Status.SUCCESS -> {
+                    binding.portfolioShimmer.stopShimmer()
+                    binding.portfolioShimmer.hide()
+                    resource.data?.let { renderPortfolioSummary(it) }
+                }
+                Status.ERROR -> {
+                    binding.portfolioShimmer.stopShimmer()
+                    binding.portfolioShimmer.hide()
+                }
+            }
+        }
+    }
+}
+```
+
+## 6. One-shot events use hasBeenHandled to prevent re-delivery on config change
+
+```kotlin
+// In ViewModel — one-shot result like form submission
+private val _otpSent = MutableLiveData<Resource<String>>()
+val otpSent: LiveData<Resource<String>> = _otpSent
+
+fun sendOtp(phone: String) {
+    _otpSent.value = Resource.loading()
+    viewModelScope.launch {
+        _otpSent.value = authRepository.sendOtp(phone)
+    }
+}
+```
+
+```kotlin
+// In Fragment — check hasBeenHandled before acting
+override fun setupObservers() {
+    viewModel.otpSent.observe(viewLifecycleOwner) { resource ->
+        if (resource.isResponseHandled()) return@observe
+
+        when (resource.status) {
+            Status.SUCCESS -> {
+                showToast("OTP sent successfully")
+                navigateToOtpVerification()
+            }
+            Status.ERROR -> {
+                showToast(resource.message ?: "Failed to send OTP")
+            }
+            Status.LOADING -> {
+                binding.btnSendOtp.isEnabled = false
+                binding.progressBar.show()
+            }
+        }
+    }
+}
+```
+
+## 7. StateFlow used ONLY in newer ViewModels — search text, sort state, loading
+
+```kotlin
+// presentation/viewmodel/FundSearchViewModel.kt
+package com.example.myapp.presentation.viewmodel
+
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.myapp.data.repository.FundRepository
+import com.example.myapp.domain.model.Item
+import com.example.myapp.utils.Resource
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class FundSearchViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+) : ViewModel() {
+
+    val searchText = MutableStateFlow("")
+    val sortOrder = MutableStateFlow(SortOrder.DEFAULT)
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _searchResults = MutableLiveData<Resource<List<Item>>>()
+    val searchResults: LiveData<Resource<List<Item>>> = _searchResults
+
+    init {
+        searchText
+            .debounce(300L)
+            .filter { it.length >= 2 }
+            .onEach { query -> performSearch(query) }
+            .launchIn(viewModelScope)
+    }
+
+    private fun performSearch(query: String) {
+        _isLoading.value = true
+        viewModelScope.launch {
+            _searchResults.value = fundRepository.searchItems(query)
+            _isLoading.value = false
+        }
+    }
+
+    fun updateSort(order: SortOrder) {
+        sortOrder.value = order
+    }
+
+    enum class SortOrder { DEFAULT, NAME_ASC, RETURNS_DESC, NAV_HIGH }
+}
+```
+
+## 8. Collecting StateFlow in Fragments
+
+```kotlin
+// In a Fragment using StateFlow for search
+override fun setupObservers() {
+    viewLifecycleOwner.lifecycleScope.launch {
+        viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.isLoading.collect { isLoading ->
+                binding.searchProgressBar.visibility =
+                    if (isLoading) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    // LiveData still used for network results
+    viewModel.searchResults.observe(viewLifecycleOwner) { resource ->
+        when (resource.status) {
+            Status.SUCCESS -> resource.data?.let { adapter.submitList(it) }
+            Status.ERROR -> showError(resource.message)
+            Status.LOADING -> { /* handled by isLoading StateFlow */ }
+        }
+    }
+}
+```
+
+## 9. ViewModelScope.launch is the async pattern — no custom dispatchers
+
+```kotlin
+fun loadData() {
+    _data.value = Resource.loading()
+    viewModelScope.launch {
+        _data.value = repository.getData()
+    }
+}
+```
+
+Repositories handle the suspend call internally. Dispatchers are NOT explicitly injected — `viewModelScope` defaults to `Dispatchers.Main.immediate`, and Retrofit suspend functions run on OkHttp's thread pool.
+
+# Input Format
+
+```
+Screen: [screen name]
+Data sources: [list of repository methods to call]
+User actions: [list of user interactions]
+One-shot events: [navigation, toasts, etc. — need hasBeenHandled]
+Uses StateFlow: [yes/no — only for search/filter/sort type fields]
+```
+
+# Output Format
+
+```
+1. Resource<T> wrapper — already exists in utils/Resource.kt
+2. ViewModel with:
+   - MutableLiveData<Resource<T>> for each data source
+   - StateFlow only for search text / sort / filter state (if needed)
+   - viewModelScope.launch for each async operation
+3. Fragment extending BaseFragment<VB> with:
+   - setupUI() — click listeners, adapters, SwipeRefreshLayout
+   - setupObservers() — observe LiveData with when(status) pattern
+   - hasBeenHandled check for one-shot events
+```
+
+# Constraints
+
+- StateFlow is the DEFAULT for new ViewModel state. Use LiveData only when an existing screen already depends on it and migration is out of scope.
+- StateFlow can be used for both network-backed state and local UI state when the screen owns its collection lifecycle.
+- There is NO sealed UiState requirement. Each piece of state may remain a separate StateFlow or LiveData bridge if migration is partial.
+- Resource<T> has `hasBeenHandled` for one-shot events. Use `isResponseHandled()` in observers for actions like navigation or toasts.
+- BaseFragment uses `setupUI()` and `setupObservers()` template methods. Always override both.
+- Binding is nulled in `onDestroyView()` via the base class. Access binding only between onViewCreated and onDestroyView.
+- ViewModels use `viewModelScope.launch` with suspend Retrofit APIs. Do NOT inject explicit dispatchers.
+- NEVER use Compose `collectAsStateWithLifecycle()` — this is a View-based codebase.
+- When creating a NEW ViewModel today, prefer StateFlow for local state but keep LiveData<Resource<T>> for API results to stay consistent with the codebase.
+
+# Examples
+
+## Input
+```
+Screen: Item Detail
+Data sources: fundRepository.getFundDetail(id), fundRepository.getSimilarFunds(category)
+User actions: Invest button click, Add to watchlist, Share item
+One-shot events: Navigate to invest flow, Show watchlist added toast
+Uses StateFlow: no
+```
+
+## Output
+
+```kotlin
+@HiltViewModel
+class FundDetailViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+    private val savedStateHandle: SavedStateHandle,
+) : ViewModel() {
+
+    private val itemId: String = checkNotNull(savedStateHandle["itemId"])
+
+    private val _fundDetail = MutableLiveData<Resource<Item>>()
+    val fundDetail: LiveData<Resource<Item>> = _fundDetail
+
+    private val _similarFunds = MutableLiveData<Resource<List<Item>>>()
+    val similarFunds: LiveData<Resource<List<Item>>> = _similarFunds
+
+    private val _watchlistResult = MutableLiveData<Resource<String>>()
+    val watchlistResult: LiveData<Resource<String>> = _watchlistResult
+
+    init {
+        loadFundDetail()
+    }
+
+    fun loadFundDetail() {
+        _fundDetail.value = Resource.loading()
+        viewModelScope.launch {
+            val result = fundRepository.getFundDetail(itemId)
+            _fundDetail.value = result
+            if (result.status == Status.SUCCESS) {
+                result.data?.category?.let { loadSimilarFunds(it) }
+            }
+        }
+    }
+
+    private fun loadSimilarFunds(category: String) {
+        _similarFunds.value = Resource.loading()
+        viewModelScope.launch {
+            _similarFunds.value = fundRepository.getSimilarFunds(category)
+        }
+    }
+
+    fun addToWatchlist() {
+        viewModelScope.launch {
+            _watchlistResult.value = fundRepository.addToWatchlist(itemId)
+        }
+    }
+}
+
+// In Fragment
+override fun setupObservers() {
+    viewModel.fundDetail.observe(viewLifecycleOwner) { resource ->
+        when (resource.status) {
+            Status.LOADING -> binding.shimmerLayout.startShimmer()
+            Status.SUCCESS -> {
+                binding.shimmerLayout.stopShimmer()
+                binding.shimmerLayout.hide()
+                resource.data?.let { renderFundDetail(it) }
+            }
+            Status.ERROR -> {
+                binding.shimmerLayout.stopShimmer()
+                showError(resource.message)
+            }
+        }
+    }
+
+    viewModel.watchlistResult.observe(viewLifecycleOwner) { resource ->
+        if (resource.isResponseHandled()) return@observe
+        when (resource.status) {
+            Status.SUCCESS -> showToast("Added to watchlist")
+            Status.ERROR -> showToast(resource.message ?: "Failed")
+            Status.LOADING -> { }
+        }
+    }
+}
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **Migration-aware baseline**: legacy screens may still expose `MutableLiveData<Resource<T>>`, but new ViewModels should default to StateFlow and migrate touched screens when low risk.
+2. **Resource<T> everywhere**: Every repository method returns `Resource<T>`. New network-backed observables should prefer `StateFlow<Resource<T>>`; legacy LiveData bridges remain acceptable only during migration.
+3. **hasBeenHandled pattern**: `Resource` has a `hasBeenHandled` boolean and `isResponseHandled()` method. Fragments check this before performing one-shot actions (navigation, toasts) to prevent re-delivery on configuration change.
+4. **No MVI**: There is no single `onEvent()` method, no sealed `UiEvent` class, no state reducer. Each ViewModel has individual public methods (`loadFunds()`, `submitKyc()`, etc.).
+5. **BaseFragment<VB>**: Every Fragment extends `BaseFragment<VB : ViewBinding>` with `setupUI()` and `setupObservers()`. Binding is auto-nulled in `onDestroyView()`.
+6. **BaseActivity<VB>**: Most activities extend `BaseActivity<VB>` which injects `NetworkConnectivityManager` and collects `showOfflineScreen`. Exception: `MainActivity` extends `AppCompatActivity` directly.
+7. **viewModelScope.launch**: This is the only async dispatch pattern. No custom dispatchers are injected. Retrofit runs on OkHttp's threads, so `Dispatchers.IO` is not needed for API calls.
+8. **Migration path**: New ViewModels should prefer StateFlow for both API-backed and local state. Keep LiveData only where a partial migration is safer than a broad refactor.
+9. **No Compose**: All UI is XML + ViewBinding. Fragments should collect StateFlow with `repeatOnLifecycle`. LiveData observation remains only for legacy screens.
+10. **Shimmer loading**: Loading states typically show shimmer placeholders, not plain progress bars. The pattern is `shimmerLayout.startShimmer()` in LOADING, `shimmerLayout.stopShimmer(); shimmerLayout.hide()` in SUCCESS/ERROR.

@@ -1,0 +1,86 @@
+---
+name: web-design-review
+version: 2.0.0
+domain: frontend
+description: Review a web page or design implementation for visual quality, hierarchy, accessibility, responsiveness, and performance.
+tags: [frontend, review, design, accessibility, performance]
+---
+
+## Purpose
+Audit frontend work the way a strong design engineer would: visual quality first, then accessibility, responsiveness, and performance.
+
+## When to Use
+Use when reviewing a page, component set, redesign, or marketing surface before merge or launch.
+
+## Input Format
+```yaml
+review_target:
+  type: "page" | "component-set" | "design-system" | "marketing-flow"
+  url_or_description: string
+context:
+  device_targets: string[]
+  accessibility_target: "AA" | "AAA"
+  performance_sensitive: boolean
+```
+
+## Output Format
+```yaml
+findings:
+  critical: string[]
+  major: string[]
+  polish: string[]
+recommendation:
+  keep_fix_or_redesign: string
+  next_steps: string[]
+review_axes:
+  visual_direction: string[]
+  accessibility: string[]
+  interaction_and_copy: string[]
+  performance_and_layout: string[]
+```
+
+## Execution Logic
+1. Review hierarchy, typography, spacing, contrast, and responsiveness.
+2. Review accessibility and keyboard model.
+3. Review forms, copy, touch behavior, state deep-linking, and hydration-sensitive UI choices.
+4. Review performance-sensitive choices such as images, motion, long lists, and JS-heavy interactions.
+4. Classify issues by severity.
+5. Return a direct verdict and next actions.
+
+## Rules
+1. Findings come before praise.
+2. Visual sameness and weak hierarchy count as design defects.
+3. Accessibility issues are major or critical, not polish.
+4. Performance regressions are design-review scope when they come from UI choices.
+5. The verdict must be actionable.
+6. Include concrete checks for labels, `aria-label`, skip links, visible focus, heading hierarchy, and reduced motion.
+7. Include content polish checks such as ellipsis character, title case, tabular numerals, and actionable error copy.
+8. Include layout-resilience checks such as `min-w-0`, truncation, empty states, image dimensions, and safe-area handling.
+
+## Constraints
+- Never call a page polished if hierarchy is weak.
+- Never hide accessibility defects under "future enhancement."
+- Never reduce the review to subjective taste.
+
+## Review Checklist
+
+- Icon-only buttons have `aria-label`.
+- Interactive elements are actual buttons or links, not generic divs.
+- Skip link exists for major pages.
+- Inputs have labels, meaningful `name`, `autocomplete`, and suitable `type` or `inputmode`.
+- Paste is never blocked.
+- Focus styles are visible and use `:focus-visible`.
+- Images have dimensions and meaningful `alt` handling.
+- Long text truncates or wraps safely; flex children use `min-w-0` when needed.
+- Motion honors `prefers-reduced-motion`.
+- Numbers that need alignment use tabular numerals.
+- Dates, times, and currency use `Intl.*`.
+- Stateful filters, tabs, and pagination are URL-reflected when the UX benefits from deep linking.
+- Full-bleed mobile layouts respect `env(safe-area-inset-*)`.
+
+## Examples
+Input: landing page with heavy gradients, small text, and animated hero.
+Output: hierarchy and readability issues, reduced-motion gap, image/perf risks, and a redesign recommendation.
+
+## Output Style
+Return a severity-ordered review with a blunt final recommendation.

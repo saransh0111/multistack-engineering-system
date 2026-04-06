@@ -1,0 +1,62 @@
+---
+name: secure-deployment
+version: 2.0.0
+domain: security-optimization
+description: Harden build and deployment pipelines with least privilege, signed artifacts, secret controls, and rollout verification.
+tags: [security, deployment, ci-cd, supply-chain, artifacts]
+---
+
+## Purpose
+Make the path from source to production resistant to tampering, credential leakage, and unsafe rollout.
+
+## When to Use
+Use when designing CI/CD, container delivery, Kubernetes deployment, mobile release, or environment promotion flows.
+
+## Input Format
+```yaml
+pipeline:
+  platforms: string[]
+  deploy_targets: string[]
+  artifact_types: string[]
+requirements:
+  approvals: boolean
+  rollback: boolean
+  sbom_needed: boolean
+```
+
+## Output Format
+```yaml
+deployment_security:
+  identity_and_access: string[]
+  artifact_controls: string[]
+  runtime_controls: string[]
+verification:
+  pre_deploy: string[]
+  post_deploy: string[]
+```
+
+## Execution Logic
+1. Map build, sign, promote, deploy, and rollback stages.
+2. IF the pipeline spans environments, separate credentials and approval scopes by environment.
+3. Add artifact immutability, provenance, and secret isolation.
+4. Define runtime verification, rollout guardrails, and rollback triggers.
+5. Return supply-chain and deployment controls together.
+
+## Rules
+1. Build once, promote immutable artifacts.
+2. Use least-privilege deploy identities.
+3. Keep secrets out of build logs and artifacts.
+4. Verify what was deployed, not just what was built.
+5. Scan dependencies and images before promotion.
+
+## Constraints
+- Never deploy from a mutable workstation build.
+- Never share production deploy credentials across lower environments.
+- Never skip rollback design.
+
+## Examples
+Input: GitHub Actions deploying Django and Go services to Kubernetes.
+Output: signed images, environment-scoped identities, admission checks, and rollback verification.
+
+## Output Style
+Return a secure delivery control set with pre- and post-deploy checks.

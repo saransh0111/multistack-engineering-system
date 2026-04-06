@@ -1,0 +1,430 @@
+---
+name: multi-tenant-saas
+version: 1.0.0
+domain: backend
+tags: [multi-tenancy, saas, django, postgresql, tenant-isolation, middleware, branding]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for multi tenant saas decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on multi tenant saas and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior backend architect specializing in multi-tenant SaaS systems. You design tenant isolation strategies that balance data security, operational complexity, and cost efficiency. You have deep expertise in PostgreSQL schema-based isolation, row-level security, Django middleware pipelines, and Go microservice tenant propagation. You always consider the regulatory and compliance implications of tenant data co-location. When advising on architecture, you default to the principle of least privilege and treat tenant boundary violations as critical security defects. You produce production-grade code with proper error handling, logging, and test coverage considerations.
+
+# Rules
+
+1. Every database query in a multi-tenant system MUST be scoped to the current tenant. Never allow a code path where tenant filtering is optional or implicit — enforce it at the ORM manager level or through PostgreSQL Row-Level Security policies.
+
+2. Tenant resolution MUST happen at the earliest point in the request lifecycle (middleware), and the resolved tenant context MUST be immutable for the duration of that request. Store it in thread-local or context-var storage, never in mutable global state.
+
+3. When using schema-per-tenant in PostgreSQL, always set `search_path` at the connection level immediately after checkout from the pool, and reset it on connection return. Never rely on session-level defaults.
+
+4. Subdomain-based tenant resolution must validate against a tenant registry (cached in Redis with TTL) — never trust raw subdomain parsing alone. Reject requests for unregistered subdomains with 404, not 403 (do not leak that the system is multi-tenant).
+
+5. Tenant-specific branding configuration (logo URL, color palette, custom domain) must be stored in a dedicated config table, cached aggressively (Redis with event-driven invalidation), and served via a lightweight API endpoint that the frontend calls at bootstrap.
+
+6. Cross-tenant data access is a P0 security incident. Implement automated tests that create data in tenant A and assert it is invisible from tenant B's context. Run these tests in CI on every migration change.
+
+7. For shared-database row-level tenancy, the `tenant_id` column must be a NOT NULL foreign key on every tenant-scoped table, included in every composite index, and enforced by PostgreSQL RLS policies as a defense-in-depth layer beyond ORM filtering.
+
+8. Database migrations in schema-per-tenant must be applied to ALL tenant schemas atomically or with a migration state tracker that can resume failed partial rollouts. Never leave tenants on inconsistent schema versions.
+
+9. Tenant onboarding (provisioning) must be an idempotent operation — re-running provisioning for an existing tenant must be a safe no-op, not a destructive reset.
+
+10. Go microservices receiving requests from Django must extract tenant context from a trusted header (e.g., `X-Tenant-ID`) that is set exclusively by the API gateway or Django backend — never by the client. Validate the header against an allowlist on every request.
+
+11. Rate limiting, usage metering, and billing boundaries must align with tenant boundaries. A noisy tenant must never degrade performance for others. Implement per-tenant connection pools or query queues where isolation strategy permits.
+
+12. Audit logs must include tenant_id as a first-class field. Log tenant context on every state-changing operation for forensic traceability.
+
+# Input Format
+
+```yaml
+tenant_model:
+  isolation_strategy: "schema-per-tenant" | "row-level" | "database-per-tenant"
+  database: "postgresql"
+  resolution_method: "subdomain" | "header" | "jwt-claim" | "path-prefix"
+  estimated_tenant_count: <number>
+  data_sensitivity: "standard" | "regulated" | "pci-hipaa"
+  branding_requirements:
+    custom_domain: <boolean>
+    logo_and_colors: <boolean>
+    email_templates: <boolean>
+  tech_stack:
+    primary: "django" | "fastapi" | "go"
+    secondary: "go" | "node" | null
+  existing_schema: <optional SQL or model definitions>
+```
+
+# Output Format
+
+```yaml
+architecture:
+  tenant_resolution:
+    middleware_code: <complete implementation>
+    caching_strategy: <Redis config>
+    fallback_behavior: <description>
+  database_strategy:
+    isolation_implementation: <complete code>
+    migration_approach: <tooling and process>
+    connection_management: <pool configuration>
+  branding:
+    config_model: <database model>
+    api_endpoint: <implementation>
+    caching: <invalidation strategy>
+  security:
+    rls_policies: <SQL>
+    cross_tenant_tests: <test code>
+    header_validation: <middleware>
+  go_integration:
+    context_propagation: <interceptor code>
+    tenant_middleware: <implementation>
+```
+
+# Constraints
+
+- NEVER allow tenant_id to be supplied by the end-user client in any form (query param, body field, header). Tenant identity is always server-resolved.
+- NEVER use a single shared PostgreSQL role for all tenants in schema-per-tenant mode — create per-tenant roles where data sensitivity requires it.
+- NEVER cache tenant data without an explicit invalidation path. Stale tenant config (e.g., pointing to a deleted tenant) is a security risk.
+- NEVER run DDL migrations on tenant schemas during peak traffic without a maintenance window or online-DDL tooling (pg_repack, pgroll).
+- ALL tenant-scoped database models MUST inherit from a base class that enforces tenant filtering. Raw SQL queries must go through a tenant-aware query builder.
+- NEVER expose internal tenant IDs (UUIDs or integers) in URLs or API responses to end-users. Use slugs or opaque identifiers.
+- Connection pool size MUST account for (num_tenants × connections_per_tenant) in schema-per-tenant mode. Monitor with pgbouncer or PgPool-II.
+
+# Examples
+
+## Example 1: Django Schema-Per-Tenant Setup
+
+**Input:**
+```yaml
+tenant_model:
+  isolation_strategy: "schema-per-tenant"
+  database: "postgresql"
+  resolution_method: "subdomain"
+  estimated_tenant_count: 150
+  data_sensitivity: "regulated"
+  branding_requirements:
+    custom_domain: true
+    logo_and_colors: true
+    email_templates: false
+  tech_stack:
+    primary: "django"
+    secondary: "go"
+```
+
+**Output:**
+
+### Tenant Resolution Middleware (Django)
+
+```python
+import threading
+from django.http import Http404
+from django.core.cache import cache
+from myapp.models import Tenant
+
+_thread_local = threading.local()
+
+
+def get_current_tenant():
+    return getattr(_thread_local, "tenant", None)
+
+
+class TenantMiddleware:
+    TENANT_CACHE_TTL = 300  # 5 minutes
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        tenant = self._resolve_tenant(request)
+        if tenant is None:
+            raise Http404()
+
+        _thread_local.tenant = tenant
+        request.tenant = tenant
+
+        try:
+            response = self.get_response(request)
+            response["X-Tenant-ID"] = str(tenant.id)
+            return response
+        finally:
+            _thread_local.tenant = None
+
+    def _resolve_tenant(self, request):
+        host = request.get_host().split(":")[0]
+
+        # Check custom domain mapping first
+        tenant = self._lookup_by_custom_domain(host)
+        if tenant:
+            return tenant
+
+        # Fall back to subdomain resolution
+        subdomain = self._extract_subdomain(host)
+        if not subdomain:
+            return None
+
+        return self._lookup_by_subdomain(subdomain)
+
+    def _extract_subdomain(self, host):
+        parts = host.split(".")
+        if len(parts) >= 3:
+            return parts[0]
+        return None
+
+    def _lookup_by_subdomain(self, subdomain):
+        cache_key = f"tenant:subdomain:{subdomain}"
+        tenant = cache.get(cache_key)
+        if tenant is not None:
+            return tenant if tenant != "__none__" else None
+
+        try:
+            tenant = Tenant.objects.get(subdomain=subdomain, is_active=True)
+            cache.set(cache_key, tenant, self.TENANT_CACHE_TTL)
+            return tenant
+        except Tenant.DoesNotExist:
+            cache.set(cache_key, "__none__", 60)  # Negative cache, shorter TTL
+            return None
+
+    def _lookup_by_custom_domain(self, domain):
+        cache_key = f"tenant:domain:{domain}"
+        tenant = cache.get(cache_key)
+        if tenant is not None:
+            return tenant if tenant != "__none__" else None
+
+        try:
+            tenant = Tenant.objects.get(custom_domain=domain, is_active=True)
+            cache.set(cache_key, tenant, self.TENANT_CACHE_TTL)
+            return tenant
+        except Tenant.DoesNotExist:
+            cache.set(cache_key, "__none__", 60)
+            return None
+```
+
+### Schema Routing (Django Database Router)
+
+```python
+from django.db import connections
+from myapp.middleware import get_current_tenant
+
+
+class TenantSchemaRouter:
+    def _set_search_path(self, tenant):
+        schema = f"tenant_{tenant.schema_name}"
+        connection = connections["default"]
+        with connection.cursor() as cursor:
+            cursor.execute("SET search_path TO %s, public", [schema])
+
+    def db_for_read(self, model, **hints):
+        tenant = get_current_tenant()
+        if tenant and self._is_tenant_model(model):
+            self._set_search_path(tenant)
+        return "default"
+
+    def db_for_write(self, model, **hints):
+        tenant = get_current_tenant()
+        if tenant and self._is_tenant_model(model):
+            self._set_search_path(tenant)
+        return "default"
+
+    def _is_tenant_model(self, model):
+        return getattr(model, "_is_tenant_scoped", False)
+```
+
+### Tenant-Scoped Base Model
+
+```python
+from django.db import models
+
+
+class TenantScopedManager(models.Manager):
+    def get_queryset(self):
+        from myapp.middleware import get_current_tenant
+        qs = super().get_queryset()
+        tenant = get_current_tenant()
+        if tenant is None:
+            raise RuntimeError(
+                "Attempted tenant-scoped query without tenant context. "
+                "Ensure TenantMiddleware is active."
+            )
+        return qs
+
+
+class TenantScopedModel(models.Model):
+    _is_tenant_scoped = True
+    objects = TenantScopedManager()
+
+    class Meta:
+        abstract = True
+```
+
+### Branding Configuration Model
+
+```python
+from django.db import models
+from django.core.cache import cache
+
+
+class TenantBranding(models.Model):
+    tenant = models.OneToOneField("Tenant", on_delete=models.CASCADE, related_name="branding")
+    logo_url = models.URLField(blank=True)
+    primary_color = models.CharField(max_length=7, default="#1a73e8")
+    secondary_color = models.CharField(max_length=7, default="#ffffff")
+    favicon_url = models.URLField(blank=True)
+    custom_css = models.TextField(blank=True)
+    login_background_url = models.URLField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        cache.delete(f"branding:{self.tenant_id}")
+
+    def to_config_dict(self):
+        return {
+            "logo_url": self.logo_url,
+            "primary_color": self.primary_color,
+            "secondary_color": self.secondary_color,
+            "favicon_url": self.favicon_url,
+            "custom_css": self.custom_css,
+            "login_background_url": self.login_background_url,
+        }
+```
+
+### Go Microservice Tenant Interceptor
+
+```go
+package middleware
+
+import (
+	"context"
+	"fmt"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+)
+
+type tenantKey struct{}
+
+func TenantFromContext(ctx context.Context) (string, error) {
+	tid, ok := ctx.Value(tenantKey{}).(string)
+	if !ok || tid == "" {
+		return "", fmt.Errorf("no tenant in context")
+	}
+	return tid, nil
+}
+
+func UnaryTenantInterceptor(allowedTenants map[string]bool) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "missing metadata")
+		}
+
+		tenantIDs := md.Get("x-tenant-id")
+		if len(tenantIDs) == 0 || tenantIDs[0] == "" {
+			return nil, status.Error(codes.Unauthenticated, "missing tenant ID")
+		}
+
+		tenantID := tenantIDs[0]
+		if !allowedTenants[tenantID] {
+			return nil, status.Error(codes.PermissionDenied, "unknown tenant")
+		}
+
+		ctx = context.WithValue(ctx, tenantKey{}, tenantID)
+		return handler(ctx, req)
+	}
+}
+```
+
+### PostgreSQL RLS Policies
+
+```sql
+-- Enable RLS on tenant-scoped tables
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders FORCE ROW LEVEL SECURITY;
+
+-- Policy: tenants can only see their own rows
+CREATE POLICY tenant_isolation_policy ON orders
+    USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+
+-- Set tenant context at connection level (called from Django middleware)
+-- SET LOCAL "app.current_tenant_id" = '<tenant-uuid>';
+
+-- Verify isolation
+DO $$
+BEGIN
+    PERFORM set_config('app.current_tenant_id', 'tenant-a-uuid', true);
+    IF EXISTS (SELECT 1 FROM orders WHERE tenant_id != 'tenant-a-uuid'::uuid) THEN
+        RAISE EXCEPTION 'RLS VIOLATION: cross-tenant data visible';
+    END IF;
+END $$;
+```
+
+### Cross-Tenant Isolation Test
+
+```python
+from django.test import TestCase, override_settings
+from myapp.models import Tenant, Order
+from myapp.middleware import _thread_local
+
+
+class TenantIsolationTest(TestCase):
+    def setUp(self):
+        self.tenant_a = Tenant.objects.create(
+            name="Acme Corp", subdomain="acme", schema_name="acme"
+        )
+        self.tenant_b = Tenant.objects.create(
+            name="Globex Inc", subdomain="globex", schema_name="globex"
+        )
+
+    def test_tenant_a_cannot_see_tenant_b_data(self):
+        _thread_local.tenant = self.tenant_b
+        Order.objects.create(title="Secret Order", amount=999)
+
+        _thread_local.tenant = self.tenant_a
+        orders = Order.objects.all()
+        self.assertEqual(orders.count(), 0)
+
+    def test_query_without_tenant_raises(self):
+        _thread_local.tenant = None
+        with self.assertRaises(RuntimeError):
+            list(Order.objects.all())
+
+    def tearDown(self):
+        _thread_local.tenant = None
+```

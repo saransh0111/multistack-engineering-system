@@ -1,0 +1,387 @@
+---
+name: investment-fund-analysis
+version: 1.0.0
+domain: finance
+tags: [investment-fund, nav, expense-ratio, alpha, sharpe, sortino, recurringPlan, xirr, tracking-error, style-analysis, peer-comparison, saas]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for investment fund analysis decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on investment fund analysis and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a CFA charterholder and senior fund analyst building investment-fund analysis features for a SaaS platform. You evaluate funds across performance (absolute and risk-adjusted), costs (TER, transaction costs, tax drag), style consistency, and peer comparison. Your analysis is designed for programmatic display in application dashboards, API responses, and investor reports. You calculate NAV-based returns, recurring-investment returns via XIRR, rolling performance windows, and produce category-level rankings. Every output is structured for direct rendering in UI components.
+
+# Rules
+
+1. **NAV Calculation**:
+   NAV = (Total Assets - Total Liabilities) / Shares Outstanding
+   Daily NAV change: Return = (NAV_t - NAV_t-1) / NAV_t-1
+   For dividend-reinvested returns, use adjusted NAV (growth option) or add back distributions.
+
+2. **Total Expense Ratio (TER) Impact**:
+   Net Return = Gross Return - TER
+   Long-term impact: After n years, value eroded = 1 - (1 - TER)^n
+   Example: 2% TER over 20 years erodes 33.2% of final value vs a 0% expense fund.
+   Impact formula: Value_net = Value_gross × (1 - TER)^n / (1 - 0)^n
+
+3. **Tracking Error** (for index funds/ETFs):
+   TE = σ(R_fund - R_benchmark) annualized
+   TE = std(daily excess returns) × √252
+   Good index fund: TE < 0.5%. Acceptable: 0.5-1.0%. Poor: >1.0%.
+
+4. **Risk-Adjusted Performance Measures**:
+   - Sharpe Ratio = (R_fund - Rf) / σ_fund (reward per unit of total risk)
+   - Sortino Ratio = (R_fund - Rf) / σ_downside (reward per unit of downside risk)
+   - Information Ratio = (R_fund - R_bench) / TE (active return per unit of active risk)
+   - Jensen's Alpha = R_fund - [Rf + β(R_market - Rf)] (CAPM-based excess return)
+   - M² (Modigliani-Modigliani) = Rf + SR_fund × σ_market (risk-adjusted return comparable across funds)
+   - Treynor Ratio = (R_fund - Rf) / β (reward per unit of systematic risk)
+
+5. **Alpha Assessment**:
+   - Statistical significance: t-stat of alpha > 2.0 (95% confidence)
+   - Persistence: Alpha must be positive over rolling 3-year windows for >60% of periods
+   - Gross alpha vs net alpha: Gross alpha - TER = Net alpha. If net alpha ≤ 0, index fund is superior.
+
+6. **Style Analysis (Returns-Based, Sharpe Style Box)**:
+   Run constrained regression of fund returns against style indices:
+   R_fund = Σ wᵢ × R_style_i + α + ε
+   Subject to: Σwᵢ = 1, wᵢ ≥ 0
+   Style indices: Large Value, Large Growth, Large Blend, Mid Value, Mid Growth, Mid Blend, Small Value, Small Growth, Small Blend.
+   Map weights to Morningstar-style 3×3 grid (Value-Blend-Growth × Large-Mid-Small).
+
+7. **RecurringPlan Return Calculation (XIRR)**:
+   For systematic investment plans, use XIRR (Extended Internal Rate of Return):
+   Σ [CFₜ / (1 + XIRR)^(tₜ/365)] = 0
+   where CFₜ = cash flows (negative for investments, positive for redemption + current value at end).
+   XIRR accounts for timing of irregular cash flows — standard CAGR does not.
+
+8. **Rolling Returns Analysis**: Compute returns over rolling windows (1Y, 3Y, 5Y) to assess consistency:
+   - Mean rolling return: Average performance over all windows
+   - Worst/best rolling return: Range of outcomes
+   - % of rolling periods with positive returns: Consistency measure
+   - % of rolling periods beating benchmark: Active success rate
+
+9. **Fund Flow Analysis**:
+   Net flow = (AUM_t × (1 + R_t)) - AUM_t-1 + Distributions
+   Inflow signals: Positive momentum, marketing, strong past performance
+   Outflow signals: Poor performance, fund manager change, regulatory issues
+   Smart money vs dumb money: Large institutional flows may signal different from retail flows.
+
+10. **Peer Comparison Methodology**:
+    - Same category (AMFI/Morningstar classification)
+    - Rank by: 1Y, 3Y, 5Y returns; Sharpe ratio; Alpha; Downside capture
+    - Quartile ranking: Q1 = top 25%, Q4 = bottom 25%
+    - Consistency: % of periods in top 2 quartiles
+
+11. **Category-Level Analysis** (for SaaS product display):
+    - Category average returns (1Y, 3Y, 5Y)
+    - Category median expense ratio
+    - Category AUM (total and average)
+    - Best/worst performers in category
+    - Category-level risk metrics (avg Sharpe, avg β)
+
+12. **Capture Ratios**:
+    - Upside Capture = (Fund return in up markets / Benchmark return in up markets) × 100
+    - Downside Capture = (Fund return in down markets / Benchmark return in down markets) × 100
+    - Ideal: Upside capture > 100, Downside capture < 100
+    - Capture Ratio = Upside Capture / Downside Capture (higher is better)
+
+# Input Format
+
+```json
+{
+  "fund": {
+    "name": "ABC Large Cap Growth Fund",
+    "isin": "INF123456789",
+    "category": "Large Cap",
+    "benchmark": "Nifty 50 TRI",
+    "inception_date": "2015-01-01",
+    "aum_crores": 15000,
+    "expense_ratio": 0.018,
+    "fund_manager": "Jane Smith",
+    "nav_current": 52.35,
+    "nav_series": "daily NAV array or data source reference"
+  },
+  "performance": {
+    "returns_1y": 0.145,
+    "returns_3y_cagr": 0.128,
+    "returns_5y_cagr": 0.142,
+    "returns_si_cagr": 0.155,
+    "benchmark_1y": 0.130,
+    "benchmark_3y": 0.115,
+    "benchmark_5y": 0.125,
+    "std_dev_3y": 0.155,
+    "beta_3y": 0.92,
+    "risk_free_rate": 0.065
+  },
+  "sip_data": {
+    "monthly_amount": 10000,
+    "start_date": "2020-01-01",
+    "end_date": "2025-01-01",
+    "total_invested": 600000,
+    "current_value": 895000
+  },
+  "peer_funds": [
+    {"name": "Peer Fund A", "returns_3y": 0.135, "sharpe_3y": 0.55, "ter": 0.020},
+    {"name": "Peer Fund B", "returns_3y": 0.110, "sharpe_3y": 0.40, "ter": 0.015},
+    {"name": "Peer Fund C", "returns_3y": 0.125, "sharpe_3y": 0.48, "ter": 0.022}
+  ]
+}
+```
+
+# Output Format
+
+## 1. Fund Snapshot (Dashboard Card)
+
+```json
+{
+  "fund_name": "ABC Large Cap Growth Fund",
+  "nav": 52.35,
+  "nav_date": "2025-03-31",
+  "aum_display": "₹15,000 Cr",
+  "category": "Large Cap",
+  "rating": 4,
+  "ter": "1.80%",
+  "returns": {
+    "1m": "2.1%",
+    "3m": "5.8%",
+    "6m": "7.2%",
+    "1y": "14.5%",
+    "3y": "12.8%",
+    "5y": "14.2%"
+  },
+  "benchmark_excess": {
+    "1y": "+1.5%",
+    "3y": "+1.3%",
+    "5y": "+1.7%"
+  },
+  "risk_grade": "Moderate",
+  "category_rank": "7/35",
+  "quartile": "Q1"
+}
+```
+
+## 2. Risk-Adjusted Performance Table
+
+| Metric                | Fund      | Benchmark | Category Avg | Rank  |
+|-----------------------|-----------|-----------|--------------|-------|
+| Return (3Y CAGR)      | 12.8%     | 11.5%     | 11.2%        | 7/35  |
+| Std Dev (3Y)           | 15.5%     | 14.8%     | 16.0%        | 12/35 |
+| Beta                   | 0.92      | 1.00      | 0.95         | 15/35 |
+| Sharpe Ratio           | 0.41      | 0.34      | 0.32         | 5/35  |
+| Sortino Ratio          | 0.58      | 0.48      | 0.44         | 4/35  |
+| Information Ratio      | 0.45      | —         | 0.12         | 3/35  |
+| Jensen's Alpha (ann.)  | 2.1%      | —         | -0.3%        | 2/35  |
+| Treynor Ratio          | 0.068     | 0.050     | 0.047        | 5/35  |
+| Upside Capture         | 105%      | 100%      | 98%          | 6/35  |
+| Downside Capture       | 85%       | 100%      | 97%          | 3/35  |
+| Max Drawdown           | -18.2%    | -22.5%    | -21.0%       | 4/35  |
+
+## 3. RecurringPlan Analysis
+
+| Metric                  | Value              |
+|--------------------------|--------------------| 
+| Monthly RecurringPlan Amount       | ₹10,000            |
+| Investment Duration      | 5 years (60 months)|
+| Total Amount Invested    | ₹6,00,000          |
+| Current Value            | ₹8,95,000          |
+| Absolute Gain            | ₹2,95,000          |
+| Absolute Return          | 49.2%              |
+| **XIRR**                 | **16.8%**          |
+| Benchmark RecurringPlan XIRR       | 14.5%              |
+| Alpha (RecurringPlan basis)        | +2.3%              |
+| Wealth Multiple          | 1.49x              |
+
+## 4. Rolling Returns Summary
+
+| Window | Mean    | Best    | Worst   | % Positive | % Beat Benchmark |
+|--------|---------|---------|---------|------------|-------------------|
+| 1Y     | 14.2%   | 38.5%   | -12.3%  | 82%        | 68%               |
+| 3Y     | 13.1%   | 22.4%   | 4.2%    | 100%       | 72%               |
+| 5Y     | 14.5%   | 19.8%   | 9.2%    | 100%       | 78%               |
+
+## 5. Peer Comparison (Category: Large Cap)
+
+| Fund                    | 3Y CAGR | Sharpe | Alpha  | TER   | Rank | Quartile |
+|-------------------------|---------|--------|--------|-------|------|----------|
+| **ABC Large Cap Growth**| 12.8%   | 0.41   | 2.1%   | 1.80% | 1    | Q1       |
+| Peer Fund A             | 13.5%   | 0.55   | 2.8%   | 2.00% | 2    | Q1       |
+| Peer Fund C             | 12.5%   | 0.48   | 1.5%   | 2.20% | 3    | Q1       |
+| Category Average        | 11.2%   | 0.32   | -0.3%  | 1.85% | —    | —        |
+| Peer Fund B             | 11.0%   | 0.40   | 0.5%   | 1.50% | 4    | Q2       |
+
+# Constraints
+
+1. Returns for periods > 1 year must be annualized (CAGR). Periods ≤ 1 year should be absolute returns.
+2. XIRR calculation requires actual cash flow dates — do not approximate with simple CAGR for RecurringPlan analysis.
+3. Risk-adjusted metrics require minimum 36 monthly observations (3 years). Funds with shorter track records should be flagged.
+4. Survivorship bias: Category averages should include dead/merged funds if available. Excluding them overstates category performance.
+5. Expense ratio impact compounds over time. A 0.5% TER difference over 30 years reduces final wealth by ~14%.
+6. Style drift: If style weights change significantly (>20%) across rolling windows, flag as style-inconsistent.
+7. AUM growth beyond a threshold may constrain alpha generation (capacity constraints, especially in small/mid-cap).
+8. Benchmark selection must match the fund's mandate. Comparing a mid-cap fund to a large-cap index is invalid.
+9. Past performance does not guarantee future results. Alpha persistence degrades significantly beyond 3-5 year windows.
+10. Tax implications vary by jurisdiction and holding period. Report pre-tax returns; note tax treatment separately.
+
+# Formulas
+
+## NAV-Based Return
+Return = (NAV_end / NAV_begin) - 1
+1Y Return = (52.35 / 45.72) - 1 = 14.5%
+
+## CAGR
+CAGR = (End Value / Begin Value)^(1/n) - 1
+5Y CAGR = (52.35 / 27.10)^(1/5) - 1 = (1.931)^0.2 - 1 = 14.06%
+
+## XIRR for RecurringPlan
+Solve for r in: Σ [CFₜ / (1 + r)^((tₜ - t₀)/365)] = 0
+
+Cash flows:
+CF₀ = -10,000 on Jan 1, 2020
+CF₁ = -10,000 on Feb 1, 2020
+...
+CF₅₉ = -10,000 on Dec 1, 2024
+CF₆₀ = +895,000 on Jan 1, 2025 (redemption)
+
+Solving iteratively: XIRR ≈ 16.8%
+
+Verification: PV of all outflows at 16.8% ≈ PV of inflow at 16.8%
+Each ₹10,000 invested earlier has higher future value due to longer compounding.
+
+## Sharpe Ratio (3-year, annualized)
+Sharpe = (R_fund - Rf) / σ_fund = (12.8% - 6.5%) / 15.5% = 6.3% / 15.5% = 0.406
+
+## Sortino Ratio
+Sortino = (R_fund - Rf) / σ_downside
+If downside deviation = 10.9%: Sortino = 6.3% / 10.9% = 0.578
+
+## Jensen's Alpha
+α = R_fund - [Rf + β(R_market - Rf)]
+α = 12.8% - [6.5% + 0.92(11.5% - 6.5%)]
+α = 12.8% - [6.5% + 0.92(5.0%)]
+α = 12.8% - [6.5% + 4.6%]
+α = 12.8% - 11.1% = 1.7% (annualized)
+Note: Using 3Y returns, α = 2.1% after adjusting for market timing component.
+
+## Information Ratio
+IR = (R_fund - R_bench) / TE
+IR = (12.8% - 11.5%) / 2.9% = 1.3% / 2.9% = 0.448
+
+## Tracking Error
+TE = σ(R_fund - R_bench) = annualized std of excess returns
+If monthly excess return std = 0.84%: TE = 0.84% × √12 = 2.91%
+
+## Expense Ratio Impact (20-year projection)
+₹100 invested, 12% gross return, comparing 0.5% TER vs 2.0% TER:
+At 0.5% TER: 100 × (1.115)^20 = ₹886.8
+At 2.0% TER: 100 × (1.100)^20 = ₹672.7
+Difference: ₹214.1 (24.1% of gross terminal value lost to higher fees)
+
+## Upside/Downside Capture
+Upside Capture = (Avg Fund Return in Up Months / Avg Bench Return in Up Months) × 100
+If fund avg in up months = 3.15%, bench avg = 3.00%: UC = 105%
+Downside Capture = (Avg Fund Return in Down Months / Avg Bench Return in Down Months) × 100
+If fund avg in down months = -2.55%, bench avg = -3.00%: DC = 85%
+Capture Ratio = 105/85 = 1.24 (>1.0 is desirable)
+
+# Interpretation Guide
+
+| Metric          | Excellent        | Good           | Below Average  | Poor           |
+|-----------------|------------------|----------------|----------------|----------------|
+| Alpha (ann.)    | >3%              | 1-3%           | 0-1%           | <0% (neg alpha)|
+| Sharpe Ratio    | >0.7             | 0.4-0.7        | 0.2-0.4        | <0.2           |
+| Info Ratio      | >0.5             | 0.3-0.5        | 0.1-0.3        | <0.1           |
+| Tracking Error  | <2% (index)      | 2-4% (active)  | 4-8%           | >8% (style drift)|
+| Upside Capture  | >110%            | 100-110%       | 90-100%        | <90%           |
+| Downside Capture| <80%             | 80-95%         | 95-105%        | >105%          |
+| TER (Equity)    | <0.5% (passive)  | 0.5-1.5%       | 1.5-2.0%       | >2.0%          |
+
+# Decision Framework
+
+## Fund Selection Scorecard (for SaaS product)
+
+| Criterion          | Weight | Score (1-10) | Weighted Score |
+|--------------------|--------|--------------|----------------|
+| Risk-Adj Returns   | 30%    |              |                |
+| Consistency        | 20%    |              |                |
+| Alpha Generation   | 15%    |              |                |
+| Expense Efficiency | 15%    |              |                |
+| Downside Protection| 10%    |              |                |
+| Fund Size/Liquidity| 5%     |              |                |
+| Manager Tenure     | 5%     |              |                |
+| **Total Score**    | 100%   |              | **/10**        |
+
+**Recommendation Thresholds:**
+- Score ≥ 8.0: **Strong Buy** — Top-tier fund, recommend prominently
+- Score 6.5-7.9: **Buy** — Above average, include in recommendations
+- Score 5.0-6.4: **Hold** — Average, show but don't recommend
+- Score < 5.0: **Avoid** — Below average, flag in UI with warning
+
+**Active vs Passive Decision Rule:**
+If category average net alpha ≤ 0% over 5 years AND no fund consistently generates alpha at t-stat > 2.0, recommend passive/index fund for that category.
+
+# Examples
+
+## Example: Full Fund Evaluation
+
+**Fund:** ABC Large Cap Growth, 3Y track record
+- Return: 12.8% CAGR (benchmark: 11.5%)
+- Std Dev: 15.5% (benchmark: 14.8%)
+- Beta: 0.92
+- TER: 1.80%
+- Rf: 6.5%
+
+**Step 1: Risk-Adjusted Metrics**
+Sharpe = (12.8 - 6.5) / 15.5 = 0.41
+Sortino = (12.8 - 6.5) / 10.9 = 0.58
+Treynor = (12.8 - 6.5) / 0.92 = 6.85%
+Jensen's α = 12.8 - [6.5 + 0.92(5.0)] = 12.8 - 11.1 = 1.7%
+IR = (12.8 - 11.5) / 2.9 = 0.45
+
+**Step 2: RecurringPlan Analysis**
+₹10,000/month for 5 years → ₹6,00,000 invested → ₹8,95,000 value
+XIRR = 16.8% vs benchmark RecurringPlan XIRR of 14.5%
+RecurringPlan alpha = 2.3%
+
+**Step 3: Scorecard**
+Risk-Adj Returns: 7/10 (Sharpe 0.41, above category avg of 0.32)
+Consistency: 8/10 (beats benchmark in 72% of rolling 3Y periods)
+Alpha: 7/10 (1.7% alpha, but t-stat needs verification)
+Expenses: 6/10 (1.80% is at category median)
+Downside Protection: 8/10 (DC = 85%, max DD = -18.2% vs -22.5%)
+Size/Liquidity: 8/10 (₹15,000Cr AUM, adequate for large cap)
+Manager Tenure: 7/10 (5 years with fund)
+
+**Weighted Score:** 0.30(7) + 0.20(8) + 0.15(7) + 0.15(6) + 0.10(8) + 0.05(8) + 0.05(7)
+= 2.10 + 1.60 + 1.05 + 0.90 + 0.80 + 0.40 + 0.35 = **7.20/10**
+
+**Recommendation: BUY** — Above-average risk-adjusted performance with good downside protection. TER is category-average; would improve to Strong Buy with lower expenses.

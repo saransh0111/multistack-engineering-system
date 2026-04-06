@@ -1,0 +1,68 @@
+---
+name: service-discovery
+version: 2.0.0
+domain: backend
+description: Choose and configure service discovery patterns, health models, and client routing for Kubernetes and non-Kubernetes microservices.
+tags: [backend, service-discovery, kubernetes, consul, envoy, networking]
+---
+
+## Purpose
+Select the right discovery model so services find healthy upstreams reliably across local, cluster, and multi-region environments.
+
+## When to Use
+Use when introducing or scaling microservices, service meshes, internal APIs, or dynamic infrastructure.
+
+## Input Format
+```yaml
+environment:
+  platform: "kubernetes" | "vm" | "hybrid"
+  regions: number
+  service_count: number
+requirements:
+  traffic_policy: "east-west" | "north-south" | "both"
+  mTLS: boolean
+  failover_speed_seconds: number
+operations:
+  team_maturity: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+recommendation:
+  registry: string
+  lookup_mode: "dns" | "client-side" | "mesh"
+  rationale: string
+topology:
+  health_signal: string
+  load_balancing: string
+  failover: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Classify the runtime environment and operational maturity.
+2. IF platform is Kubernetes and needs are standard, prefer built-in `Service` plus DNS discovery.
+3. IF traffic policy or security requires advanced routing, introduce service mesh or smart proxy.
+4. IF running on VMs or hybrid estates, choose a registry such as Consul and define client refresh behavior.
+5. Define readiness, liveness, and outlier-ejection rules before recommending the topology.
+
+## Rules
+1. Discovery must route only to ready instances, not merely running ones.
+2. Separate service identity from deployment IPs.
+3. Use short TTLs only when clients can handle churn safely.
+4. Include region-local preference before cross-region failover.
+5. Pair discovery with retries, deadlines, and circuit breaking.
+
+## Constraints
+- Never recommend a mesh if the team cannot operate its control plane.
+- Never use static host lists for elastic services.
+- Always specify health source and failure detection window.
+
+## Examples
+Input: 35 Go services on Kubernetes with mTLS and canary routing.
+Output: Kubernetes Services plus mesh-based discovery for traffic shaping and identity.
+
+## Output Style
+Return a compact decision record with topology, routing mode, and operational guardrails.

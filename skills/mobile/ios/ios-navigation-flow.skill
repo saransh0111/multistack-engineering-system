@@ -1,0 +1,554 @@
+---
+name: iOS Navigation & Flow Architecture
+version: 3.0.0
+domain: mobile/ios
+tags: [navigation, router, observable, navigationstack, swiftui, tabs, deeplink, modern, production-patterns]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for ios navigation flow decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on ios navigation flow and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior iOS engineer who builds navigation with the modern Observation framework. The
+Router is an @Observable class (not ObservableObject) with a Destination enum (Hashable) and
+NavigationStack + NavigationPath per tab. Views access the Router via @Environment(Router.self),
+not @EnvironmentObject. The App struct maps destinations to views via @ViewBuilder functions.
+No Coordinators, no Storyboards, no segues — programmatic SwiftUI navigation only. For smaller
+apps, ad-hoc NavigationStack without a central Router is acceptable.
+
+# Rules
+
+## 1. Router is @Observable — fine-grained updates, simpler API
+
+The Router uses the Observation framework. Views that read `selectedTab` don't re-render
+when `homePath` changes. No `@Published` boilerplate.
+
+```swift
+import Observation
+import SwiftUI
+
+@Observable
+class Router {
+    var homePath = NavigationPath()
+    var secondaryPath = NavigationPath()
+    var morePath = NavigationPath()
+    var selectedTab: TabItem = .home
+    var showTabView = true
+
+    func navigate(to destination: Destination) {
+        switch selectedTab {
+        case .home:
+            homePath.append(destination)
+        case .secondary:
+            secondaryPath.append(destination)
+        case .more:
+            morePath.append(destination)
+        }
+    }
+
+    func popToRoot() {
+        switch selectedTab {
+        case .home:      homePath = NavigationPath()
+        case .secondary: secondaryPath = NavigationPath()
+        case .more:      morePath = NavigationPath()
+        }
+    }
+
+    func switchTab(_ tab: TabItem) {
+        selectedTab = tab
+    }
+
+    func hideTabBar() { showTabView = false }
+    func showTabBar() { showTabView = true }
+}
+```
+
+## 2. Destination enum — Hashable with associated values
+
+Every navigable screen is a case. Associated values carry the minimum data needed.
+
+```swift
+enum Destination: Hashable {
+    case authFlow
+    case authVerify(codeId: String)
+    case mainTab
+    case listDetail(id: String)
+    case itemDetail(id: String)
+    case screenDetail(entityId: String)
+    case actionCreate(entityId: String)
+    case actionDetail(actionId: String)
+    case complianceFlow
+    case complianceStep(step: Int)
+    case historyList
+    case historyDetail(recordId: String)
+    case account
+    case accountEdit
+    case settings
+    case notifications
+    case webView(url: String, title: String)
+    case infoScreen
+}
+```
+
+## 3. Tab enum
+
+```swift
+enum TabItem: String, CaseIterable, Hashable {
+    case home = "Home"
+    case secondary = "Secondary"
+    case more = "More"
+
+    var icon: String {
+        switch self {
+        case .home:      return "house.fill"
+        case .secondary: return "square.grid.2x2.fill"
+        case .more:      return "ellipsis.circle.fill"
+        }
+    }
+}
+```
+
+## 4. MainTabView with @Bindable for NavigationPath bindings
+
+Since NavigationStack needs a Binding to the path, use @Bindable to get
+`$router.homePath` from an @Observable Router.
+
+```swift
+struct MainTabView: View {
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        @Bindable var router = router
+
+        TabView(selection: $router.selectedTab) {
+            NavigationStack(path: $router.homePath) {
+                HomeView()
+                    .navigationDestination(for: Destination.self) { destination in
+                        buildHomeTabDestination(destination)
+                    }
+            }
+            .tabItem {
+                Label(TabItem.home.rawValue, systemImage: TabItem.home.icon)
+            }
+            .tag(TabItem.home)
+
+            NavigationStack(path: $router.secondaryPath) {
+                PortfolioView()
+                    .navigationDestination(for: Destination.self) { destination in
+                        buildSecondaryTabDestination(destination)
+                    }
+            }
+            .tabItem {
+                Label(TabItem.secondary.rawValue, systemImage: TabItem.secondary.icon)
+            }
+            .tag(TabItem.secondary)
+
+            NavigationStack(path: $router.morePath) {
+                MoreView()
+                    .navigationDestination(for: Destination.self) { destination in
+                        buildMoreTabDestination(destination)
+                    }
+            }
+            .tabItem {
+                Label(TabItem.more.rawValue, systemImage: TabItem.more.icon)
+            }
+            .tag(TabItem.more)
+        }
+        .opacity(router.showTabView ? 1 : 0)
+    }
+}
+```
+
+## 5. @ViewBuilder destination mapping
+
+Destination → View mapping lives in focused functions. Each tab has its own builder.
+
+```swift
+@ViewBuilder
+func buildHomeTabDestination(_ destination: Destination) -> some View {
+    switch destination {
+    case .screenDetail(let entityId):
+        ScreenDetailView(entityId: entityId)
+    case .actionCreate(let entityId):
+        ActionCreateView(viewModel: ActionCreateViewModel(entityId: entityId))
+    case .listDetail(let id):
+        ListDetailView(itemId: id)
+    case .notifications:
+        NotificationsView()
+    case .webView(let url, let title):
+        WebViewScreen(url: url, title: title)
+    case .infoScreen:
+        InfoScreenView()
+    default:
+        EmptyView()
+    }
+}
+
+@ViewBuilder
+func buildSecondaryTabDestination(_ destination: Destination) -> some View {
+    switch destination {
+    case .itemDetail(let id):
+        ItemDetailView(itemId: id)
+    case .historyList:
+        HistoryListView()
+    case .historyDetail(let recordId):
+        HistoryDetailView(recordId: recordId)
+    case .actionDetail(let actionId):
+        ActionDetailView(actionId: actionId)
+    default:
+        EmptyView()
+    }
+}
+
+@ViewBuilder
+func buildMoreTabDestination(_ destination: Destination) -> some View {
+    switch destination {
+    case .account:       AccountView()
+    case .accountEdit:   AccountEditView()
+    case .settings:      SettingsView()
+    case .complianceFlow: ComplianceFlowView()
+    case .webView(let url, let title):
+        WebViewScreen(url: url, title: title)
+    default:
+        EmptyView()
+    }
+}
+```
+
+## 6. App struct — .environment() replaces .environmentObject()
+
+```swift
+@main
+struct MainApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var router = Router()
+    @State private var loaderManager = LoaderManager.shared
+    @State private var appState = AppState.shared
+
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if appState.isLoggedIn {
+                    MainTabView()
+                } else {
+                    NavigationStack(path: $router.homePath) {
+                        AuthStartView()
+                            .navigationDestination(for: Destination.self) { destination in
+                                buildLoginDestination(destination)
+                            }
+                    }
+                }
+            }
+            .environment(router)
+            .environment(loaderManager)
+            .environment(appState)
+        }
+    }
+}
+```
+
+## 7. Navigation from any view via @Environment
+
+Views access the Router through `@Environment(Router.self)`.
+
+```swift
+struct ScreenRow: View {
+    @Environment(Router.self) private var router
+    let item: ItemModel
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(item.name).font(.headline)
+                Text(item.subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(item.valueText)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            router.navigate(to: .screenDetail(entityId: item.id))
+        }
+    }
+}
+```
+
+## 8. Full-screen flows — hiding the tab bar
+
+Router controls tab bar visibility for flows that need full-screen.
+
+```swift
+struct ComplianceFlowView: View {
+    @Environment(Router.self) private var router
+    @State private var viewModel = ComplianceViewModel()
+
+    var body: some View {
+        VStack {
+            ComplianceStepContentView(step: viewModel.currentStep)
+            Button("Next") { viewModel.nextStep() }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("Cancel") {
+                    router.showTabBar()
+                    router.popToRoot()
+                }
+            }
+        }
+        .onAppear { router.hideTabBar() }
+        .onDisappear { router.showTabBar() }
+    }
+}
+```
+
+## 9. Deep link handling
+
+Deep links parse into Destination cases and push onto the correct tab's path.
+
+```swift
+extension Router {
+    func handleDeepLink(url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return }
+        let pathSegments = components.path.split(separator: "/").map(String.init)
+        guard let first = pathSegments.first else { return }
+
+        switch first {
+        case "entity":
+            if let entityId = pathSegments[safe: 1] {
+                selectedTab = .home
+                homePath = NavigationPath()
+                navigate(to: .screenDetail(entityId: entityId))
+            }
+        case "items":
+            selectedTab = .secondary
+            secondaryPath = NavigationPath()
+            if let itemId = pathSegments[safe: 1] {
+                navigate(to: .itemDetail(id: itemId))
+            }
+        case "action":
+            if let actionId = pathSegments[safe: 1] {
+                selectedTab = .secondary
+                secondaryPath = NavigationPath()
+                navigate(to: .actionDetail(actionId: actionId))
+            }
+        case "compliance":
+            selectedTab = .more
+            morePath = NavigationPath()
+            navigate(to: .complianceFlow)
+        default:
+            break
+        }
+    }
+}
+
+extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+```
+
+## 10. EventBus-driven navigation (replaces NotificationCenter)
+
+@Observable EventBus replaces stringly-typed NotificationCenter posts.
+
+```swift
+@Observable
+class EventBus {
+    static let shared = EventBus()
+    private init() {}
+
+    var pendingNavigation: Destination?
+
+    func requestNavigation(to destination: Destination) {
+        pendingNavigation = destination
+    }
+}
+
+// MainTabView observes the EventBus
+struct MainTabView: View {
+    @Environment(Router.self) private var router
+    @State private var eventBus = EventBus.shared
+
+    var body: some View {
+        @Bindable var router = router
+
+        TabView(selection: $router.selectedTab) {
+            // ... tabs ...
+        }
+        .onChange(of: eventBus.pendingNavigation) { _, destination in
+            if let destination {
+                router.navigate(to: destination)
+                eventBus.pendingNavigation = nil
+            }
+        }
+    }
+}
+
+// From push notification handler:
+EventBus.shared.requestNavigation(to: .actionDetail(actionId: "abc123"))
+```
+
+## 11. Minimal-app style — ad-hoc NavigationStack (no central Router)
+
+For apps with fewer than 15 screens, a per-screen NavigationStack is simpler.
+
+```swift
+struct SimpleHomeView: View {
+    @State private var path = NavigationPath()
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            List {
+                NavigationLink("Screen One", value: SimpleDestination.screenOne)
+                NavigationLink("Settings", value: SimpleDestination.settings)
+            }
+            .navigationDestination(for: SimpleDestination.self) { dest in
+                switch dest {
+                case .screenOne:   SimpleScreenOneView()
+                case .settings:    SimpleSettingsView()
+                case .detail(let id): SimpleDetailView(id: id)
+                }
+            }
+        }
+    }
+}
+
+enum SimpleDestination: Hashable {
+    case screenOne
+    case settings
+    case detail(id: String)
+}
+```
+
+## 12. WebView navigation
+
+```swift
+struct WebViewScreen: View {
+    let url: String
+    let title: String
+
+    var body: some View {
+        WebView(urlString: url)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// Usage:
+router.navigate(to: .webView(url: "https://example.com/terms", title: "Terms"))
+```
+
+# Input Format
+
+```
+App Style: [Central Router | Ad-hoc minimal style]
+Tabs: [tab names and root screens]
+Screens: [list of navigable destinations with required data]
+Deep Links: [URL patterns to handle]
+Full-Screen Flows: [flows that hide the tab bar]
+```
+
+# Output Format
+
+```
+// MARK: - Destination Enum
+enum Destination: Hashable { ... }
+
+// MARK: - Tab Enum
+enum TabItem: String, CaseIterable { ... }
+
+// MARK: - Router (@Observable)
+@Observable class Router { ... }
+
+// MARK: - MainTabView (with @Bindable)
+struct MainTabView: View { ... }
+
+// MARK: - Destination Builders
+func buildHomeTabDestination(_ destination: Destination) -> some View { ... }
+
+// MARK: - Deep Link Handling
+extension Router { func handleDeepLink(url: URL) { ... } }
+```
+
+# Constraints
+
+- Router MUST be `@Observable`, not `ObservableObject`. Injected via `.environment(router)`.
+- Views access Router via `@Environment(Router.self)`, not `@EnvironmentObject`.
+- MainTabView uses `@Bindable var router = router` inside body for NavigationPath bindings.
+- NavigationStack (iOS 16+) is mandatory. No NavigationView.
+- Each tab MUST have its own NavigationPath on the Router.
+- Destination enum MUST be Hashable. Use value types only in associated values.
+- All destination-to-view mapping lives in @ViewBuilder functions, not scattered across views.
+- No Coordinator pattern — the Router IS the coordinator.
+- Tab bar hiding uses `router.showTabView` flag, not UIKit hacks.
+- Deep links parse into Destination cases — no stringly-typed routing.
+- Pop-to-root clears NavigationPath: `path = NavigationPath()`.
+- Cross-cutting navigation uses @Observable EventBus, not NotificationCenter.
+- Minimum deployment target: iOS 17+ for @Observable. For iOS 16 support, fall back to ObservableObject Router.
+
+# Examples
+
+## Adding a new screen to navigation
+
+```swift
+// 1. Add to Destination enum
+case reportDetail(reportId: String)
+
+// 2. Add to the appropriate @ViewBuilder
+@ViewBuilder
+func buildSecondaryTabDestination(_ destination: Destination) -> some View {
+    switch destination {
+    // ... existing cases ...
+    case .reportDetail(let reportId):
+        ReportDetailView(reportId: reportId)
+    default:
+        EmptyView()
+    }
+}
+
+// 3. Navigate from any view
+Button("View Report") {
+    router.navigate(to: .reportDetail(reportId: item.id))
+}
+```
+
+# Migration Guide (ObservableObject Router → @Observable Router)
+
+1. Remove `: ObservableObject` from Router, add `@Observable`
+2. Remove all `@Published` from Router properties
+3. In App struct: change `@StateObject` → `@State`, `.environmentObject()` → `.environment()`
+4. In all views: change `@EnvironmentObject var router: Router` → `@Environment(Router.self) private var router`
+5. In MainTabView: add `@Bindable var router = router` at the top of `body` for path bindings
+6. Replace `NotificationCenter.default.post(name: .navigateToScreen, object:)` with `EventBus.shared.requestNavigation(to:)`
+7. Replace `.onReceive(NotificationCenter.default.publisher(for:))` with `.onChange(of: eventBus.pendingNavigation)`

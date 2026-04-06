@@ -1,0 +1,69 @@
+---
+name: chat-system-design
+version: 2.0.0
+domain: messaging
+description: Design chat and messaging systems with delivery semantics, presence, fanout, storage, moderation, and sync behavior.
+tags: [messaging, chat, websocket, realtime, presence]
+---
+
+## Purpose
+Design chat systems that handle realtime delivery, offline sync, moderation, and conversation consistency.
+
+## When to Use
+Use for support chat, team messaging, marketplace messaging, or any user-to-user conversation feature.
+
+## Input Format
+```yaml
+product:
+  chat_type: "1to1" | "group" | "support" | "mixed"
+  attachments: boolean
+  moderation_required: boolean
+scale:
+  dau: number
+  concurrent_connections: number
+requirements:
+  typing_presence: boolean
+  message_history_days: number
+  multi_device_sync: boolean
+```
+
+## Output Format
+```yaml
+system:
+  transport: string
+  storage_model: string
+  fanout_strategy: string
+delivery:
+  ordering_scope: string
+  offline_sync: string
+  unread_model: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Separate durable message state from transient signals like typing and presence.
+2. IF the product needs large-scale fanout, use broker-backed delivery rather than direct server loops alone.
+3. IF moderation or compliance matters, persist messages with audit metadata before wide fanout.
+4. Define message IDs, read state, and multi-device sync behavior.
+5. Return transport, storage, and abuse-control model together.
+
+## Rules
+1. Presence and typing are transient; messages are durable.
+2. Message IDs must be globally unique and sortable enough for sync.
+3. Support reconnect and catch-up from last acknowledged event.
+4. Keep unread counters derivable or repairable.
+5. Include spam and abuse controls from the start.
+
+## Constraints
+- Never depend on in-memory presence or unread state as the only source.
+- Never assume global ordering across all conversations.
+- Never ignore attachment scanning and moderation if file sharing exists.
+
+## Examples
+Input: marketplace buyer-seller chat with mobile offline support.
+Output: WebSocket delivery, persistent message store, transient presence service, and sync cursor model.
+
+## Output Style
+Return a chat blueprint with transport, storage, sync, and risk controls.

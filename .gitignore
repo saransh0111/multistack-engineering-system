@@ -1,0 +1,9 @@
+# Dependencies and build output (any path in the repo)
+node_modules/
+dist/
+.turbo/
+.vite/
+
+# OS / editor
+.DS_Store
+*.log

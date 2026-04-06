@@ -1,0 +1,66 @@
+---
+name: database-sharding
+version: 2.0.0
+domain: backend
+description: Choose sharding keys, routing models, rebalancing strategies, and hot-spot mitigation for horizontally scaled data stores.
+tags: [backend, database, sharding, scaling, partitioning]
+---
+
+## Purpose
+Design a shard strategy that increases write and storage capacity without destroying queryability or operability.
+
+## When to Use
+Use when a single database instance is approaching storage, throughput, or noisy-neighbor limits that indexing and vertical scaling cannot solve.
+
+## Input Format
+```yaml
+workload:
+  primary_entity: string
+  write_pattern: "tenant-heavy" | "user-heavy" | "time-series" | "mixed"
+  largest_queries: string[]
+  projected_growth_12m: string
+constraints:
+  cross_shard_queries: "rare" | "moderate" | "common"
+  compliance_boundaries: string[]
+```
+
+## Output Format
+```yaml
+shard_strategy:
+  key: string
+  algorithm: string
+  routing: string
+  rebalance: string
+operational_plan:
+  hot_key_mitigation: string[]
+  observability: string[]
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Validate that sharding is necessary and simpler optimizations are exhausted.
+2. Select a shard key that aligns with dominant write and isolation boundaries.
+3. IF tenant boundaries dominate, prefer tenant-based sharding.
+4. IF time-based growth dominates, prefer temporal partitioning plus archival before full sharding.
+5. Define routing, rebalancing, and cross-shard query strategy together.
+
+## Rules
+1. Choose keys with high cardinality and stable ownership.
+2. Measure skew and hot partitions continuously.
+3. Keep shard maps in a durable, cacheable routing service.
+4. Isolate admin and backfill workloads from customer traffic.
+5. Plan rebalancing from day one, not after saturation.
+
+## Constraints
+- Never shard on a low-cardinality key.
+- Never ignore cross-shard transactions and reporting costs.
+- Never assume even tenant growth.
+
+## Examples
+Input: multi-tenant billing platform with a few very large tenants.
+Output: tenant-based shard map with whale-tenant isolation, routing service, and rebalancing runbook.
+
+## Output Style
+Return a concise shard design with routing, growth path, and operational risks.

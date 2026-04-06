@@ -1,0 +1,59 @@
+---
+name: business-model-analysis
+version: 2.0.0
+domain: product-management
+description: Evaluate how a product creates, captures, and defends value through revenue, cost, and distribution mechanics.
+tags: [product, business-model, strategy, revenue]
+---
+
+## Purpose
+Test whether the business model can support growth, margins, and competitive resilience.
+
+## When to Use
+Use for monetization design, pricing shifts, market entry, and investor-level strategy reviews.
+
+## Input Format
+```yaml
+model:
+  customer: string
+  pricing: string
+  revenue_streams: string[]
+  major_costs: string[]
+market:
+  competition: string[]
+```
+
+## Output Format
+```yaml
+analysis:
+  value_creation: string[]
+  value_capture: string[]
+  weaknesses: string[]
+recommendation:
+  keep_change_or_test: string
+```
+
+## Execution Logic
+1. Map customer value, willingness to pay, and delivery cost.
+2. Identify margin pressure, churn risk, and distribution friction.
+3. Compare defensibility against alternatives.
+4. Return keep/change/test decision with rationale.
+
+## Rules
+1. Revenue without retention is weak capture.
+2. Growth that destroys unit economics is not sustainable.
+3. Separate acquisition model from monetization model.
+4. Note concentration risk by customer or channel.
+5. Include strategic downside risk.
+
+## Constraints
+- Never evaluate revenue in isolation from cost-to-serve.
+- Never ignore competitive response.
+- Never stop at descriptive analysis.
+
+## Examples
+Input: usage-based API product.
+Output: value capture analysis with risks around cost variability and pricing fit.
+
+## Output Style
+Return a business model diagnosis with one clear recommendation.

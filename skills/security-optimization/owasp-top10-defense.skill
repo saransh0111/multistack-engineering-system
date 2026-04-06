@@ -1,0 +1,61 @@
+---
+name: owasp-top10-defense
+version: 2.0.0
+domain: security-optimization
+description: Apply OWASP Top 10-style defenses to architecture, code, and deployment decisions.
+tags: [security, owasp, threat-modeling, defense-in-depth]
+---
+
+## Purpose
+Map product and engineering decisions to common web application attack classes and their practical mitigations.
+
+## When to Use
+Use during architecture reviews, pre-launch hardening, security audits, and remediation planning.
+
+## Input Format
+```yaml
+system:
+  surfaces: string[]
+  data_classes: string[]
+  third_parties: string[]
+review_scope:
+  stage: "design" | "implementation" | "prelaunch" | "incident-followup"
+```
+
+## Output Format
+```yaml
+threat_map:
+  - category: string
+    exposure: string
+    mitigation: string
+priority_actions:
+  - string
+verification:
+  tests: string[]
+```
+
+## Execution Logic
+1. Enumerate assets, entry points, and trust boundaries.
+2. Map exposures to OWASP-style categories such as broken access control, injection, cryptographic failure, insecure design, and logging gaps.
+3. Rank by exploitability and business impact.
+4. Attach prevention plus verification for each high-priority category.
+5. Return a concrete remediation order.
+
+## Rules
+1. Broken access control is high priority by default.
+2. Treat insecure design and secrets exposure as architectural issues, not only coding issues.
+3. Pair every mitigation with a test or control.
+4. Include monitoring and logging failures in the review.
+5. Prefer elimination of attack surface over compensating controls.
+
+## Constraints
+- Never output OWASP categories without system-specific mitigation.
+- Never reduce the review to checklist theater.
+- Never ignore third-party and supply-chain exposure.
+
+## Examples
+Input: public SaaS platform with admin portal and mobile API.
+Output: threat map with top risks, mitigations, and targeted verification steps.
+
+## Output Style
+Return a prioritized threat-and-defense list with direct engineering actions.

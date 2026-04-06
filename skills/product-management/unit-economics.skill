@@ -1,0 +1,62 @@
+---
+name: unit-economics
+version: 2.0.0
+domain: product-management
+description: Evaluate contribution margin, CAC, LTV, payback, and cost-to-serve for product and GTM decisions.
+tags: [product, finance, unit-economics, margins]
+---
+
+## Purpose
+Test whether growth creates value or just grows losses.
+
+## When to Use
+Use for pricing, GTM design, board reviews, market expansion, and feature investments with meaningful cost impact.
+
+## Input Format
+```yaml
+economics:
+  arpu: number
+  gross_margin_pct: number
+  cac: number
+  churn_pct: number
+  variable_costs: string[]
+context:
+  segment: string
+  motion: string
+```
+
+## Output Format
+```yaml
+unit_economics:
+  ltv_direction: string
+  payback_direction: string
+  margin_health: string
+decision:
+  status: "healthy" | "watch" | "unhealthy"
+  actions: string[]
+```
+
+## Execution Logic
+1. Evaluate revenue quality, gross margin, acquisition efficiency, and retention.
+2. IF churn is high, discount LTV confidence.
+3. IF cost-to-serve scales poorly, flag hidden margin risk.
+4. Return health status and actions that improve economics.
+
+## Rules
+1. Retention quality matters as much as top-line ARPU.
+2. CAC must match the actual motion and channel.
+3. Include service and support cost where material.
+4. Use ranges or directional confidence when data is weak.
+5. Tie economics back to strategy decisions.
+
+## Constraints
+- Never present LTV as precise when retention data is immature.
+- Never ignore gross margin.
+- Never approve aggressive growth on broken unit economics without explicit rationale.
+
+## Examples
+Input: mid-market SaaS with rising support burden.
+Output: watch or unhealthy diagnosis with pricing and efficiency actions.
+
+## Output Style
+Return a blunt unit-economics verdict and what to change.

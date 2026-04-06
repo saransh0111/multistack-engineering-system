@@ -1,0 +1,62 @@
+---
+name: auth-security-hardening
+version: 2.0.0
+domain: security-optimization
+description: Harden authentication and authorization flows with MFA, token hygiene, session controls, and privilege boundaries.
+tags: [security, auth, authorization, sessions, mfa]
+---
+
+## Purpose
+Reduce account takeover, privilege escalation, and session abuse risk.
+
+## When to Use
+Use when designing or reviewing login, refresh token, SSO, admin access, or service-to-service identity flows.
+
+## Input Format
+```yaml
+auth_surface:
+  user_types: string[]
+  login_methods: string[]
+  privileged_roles: string[]
+requirements:
+  sso: boolean
+  mfa: boolean
+  device_trust: boolean
+```
+
+## Output Format
+```yaml
+hardening_plan:
+  identity_flows: string[]
+  token_policy: string[]
+  session_controls: string[]
+  admin_controls: string[]
+monitoring:
+  detections: string[]
+```
+
+## Execution Logic
+1. Identify human and machine principals.
+2. IF privileged access exists, require stronger authentication and tighter session controls.
+3. Define token issuance, rotation, revocation, and storage policy.
+4. Add anomaly detection, step-up auth, and account recovery protections.
+5. Return authn, authz, and monitoring controls together.
+
+## Rules
+1. Separate authentication from authorization.
+2. Use least privilege and short-lived tokens.
+3. Rotate refresh tokens and detect reuse.
+4. Protect recovery flows as strongly as login flows.
+5. Require stronger controls for admin and financial actions.
+
+## Constraints
+- Never store long-lived bearer tokens insecurely on client devices.
+- Never rely on role checks without resource ownership rules.
+- Never skip MFA on privileged accounts.
+
+## Examples
+Input: SaaS app with customer admins, internal ops staff, and mobile sessions.
+Output: MFA for admins, rotating refresh tokens, scoped service tokens, and reuse detection.
+
+## Output Style
+Return a direct hardening plan with identity, session, and detection controls.

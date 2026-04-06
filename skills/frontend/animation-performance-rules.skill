@@ -1,0 +1,65 @@
+---
+name: animation-performance-rules
+version: 2.0.0
+domain: frontend
+description: Choose motion techniques, frame-budget-safe properties, and reduced-jank interaction patterns for React, Next.js, and Nuxt interfaces.
+tags: [frontend, animation, performance, framer-motion, gsap]
+---
+
+## Purpose
+Keep motion expressive without sacrificing frame rate, battery life, or accessibility.
+
+## When to Use
+Use when planning hero animations, dashboard transitions, scroll effects, or brand-heavy interfaces.
+
+## Input Format
+```yaml
+experience:
+  surface: "landing" | "dashboard" | "app-shell" | "storytelling"
+  animation_density: "low" | "medium" | "high"
+  target_devices: string[]
+requirements:
+  seo_sensitive: boolean
+  low_end_device_support: boolean
+  reduced_motion_required: boolean
+```
+
+## Output Format
+```yaml
+motion_strategy:
+  library: string
+  allowed_properties: string[]
+  avoided_patterns: string[]
+performance_plan:
+  frame_budget: string
+  loading_strategy: string
+  profiling: string[]
+fallbacks:
+  reduced_motion: string
+```
+
+## Execution Logic
+1. Classify the page by motion intensity and device constraints.
+2. IF animation is page-ornamental, prefer CSS transforms and opacity.
+3. IF sequencing is complex, choose Framer Motion or GSAP based on interaction depth and SSR impact.
+4. Ban layout-thrashing properties and limit concurrent animated elements on low-end devices.
+5. Provide reduced-motion and non-JS fallback behavior.
+
+## Rules
+1. Animate `transform` and `opacity` first.
+2. Measure on target hardware, not only desktop simulators.
+3. Gate scroll-linked effects behind performance checks.
+4. Lazy-load heavy animation libraries below the fold where possible.
+5. Tie motion decisions to business value, not novelty.
+
+## Constraints
+- Never animate expensive layout properties by default.
+- Never ship critical content behind animation timing.
+- Never ignore reduced-motion preferences.
+
+## Examples
+Input: Next.js marketing site with scroll storytelling and mobile traffic.
+Output: GSAP only on desktop hero sections, CSS transitions elsewhere, reduced-motion fallback, and profiling checklist.
+
+## Output Style
+Return a motion policy with library choice, safe properties, and fallback rules.

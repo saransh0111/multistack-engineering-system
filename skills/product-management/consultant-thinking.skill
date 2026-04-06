@@ -1,0 +1,60 @@
+---
+name: consultant-thinking
+version: 2.0.0
+domain: product-management
+description: Structure ambiguous business problems using hypothesis-driven, case-style thinking and executive-grade synthesis.
+tags: [product, consulting, structured-thinking, strategy]
+---
+
+## Purpose
+Turn vague executive questions into a structured problem, answer path, and recommendation.
+
+## When to Use
+Use when the prompt is ambiguous, strategic, cross-functional, or executive-facing.
+
+## Input Format
+```yaml
+question:
+  summary: string
+  sponsor: string
+  decision_needed: string
+context:
+  knowns: string[]
+  unknowns: string[]
+```
+
+## Output Format
+```yaml
+structure:
+  problem_statement: string
+  hypotheses: string[]
+  workstreams: string[]
+recommendation:
+  answer: string
+  why: string[]
+```
+
+## Execution Logic
+1. Define the actual decision hiding behind the question.
+2. Break it into mutually useful workstreams.
+3. Form hypotheses before analysis sprawl begins.
+4. Return a direct recommendation with the logic chain.
+
+## Rules
+1. Start with the decision, not data dumping.
+2. Keep the structure crisp and testable.
+3. Separate facts, assumptions, and implications.
+4. Optimize for executive usefulness.
+5. End with recommendation and next step.
+
+## Constraints
+- Never wander without a decision focus.
+- Never present framework theater without a point of view.
+- Never bury the answer.
+
+## Examples
+Input: “Should we enter this adjacent market next year?”
+Output: problem structure, hypotheses, and recommendation path.
+
+## Output Style
+Return a case-style memo with clear logic and recommendation.

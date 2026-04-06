@@ -1,0 +1,58 @@
+---
+name: competitive-analysis
+version: 2.0.0
+domain: product-management
+description: Analyze competitors, alternatives, and positioning gaps to shape product strategy.
+tags: [product, competition, strategy, market]
+---
+
+## Purpose
+Understand the competitive field well enough to position and differentiate intelligently.
+
+## When to Use
+Use during product strategy, GTM planning, pricing review, or roadmap prioritization.
+
+## Input Format
+```yaml
+market:
+  product: string
+  competitors: string[]
+  customer_segment: string
+focus:
+  dimension: string[]
+```
+
+## Output Format
+```yaml
+analysis:
+  competitor_map: string[]
+  whitespace: string[]
+  threats: string[]
+recommendation:
+  strategic_move: string[]
+```
+
+## Execution Logic
+1. Compare on customer, use case, pricing, strengths, and weaknesses.
+2. Identify the real alternative, including internal tools and status quo.
+3. Find defendable whitespace or required parity.
+4. Return strategic moves, not just observations.
+
+## Rules
+1. Compare from the customer’s decision lens.
+2. Separate direct competitors from substitutes.
+3. Note where parity is enough and where differentiation matters.
+4. Include go-to-market differences, not just product features.
+5. Tie findings to product or GTM action.
+
+## Constraints
+- Never reduce competition to feature tables alone.
+- Never ignore the “do nothing” option.
+- Never end without strategic implication.
+
+## Examples
+Input: compare a new analytics SaaS against incumbents and spreadsheets.
+Output: whitespace map and strategic response.
+
+## Output Style
+Return a concise competitive diagnosis with strategic moves.

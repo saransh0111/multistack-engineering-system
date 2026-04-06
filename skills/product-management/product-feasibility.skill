@@ -1,0 +1,61 @@
+---
+name: product-feasibility
+version: 2.0.0
+domain: product-management
+description: Evaluate desirability, viability, feasibility, and risk before committing to product investment.
+tags: [product, feasibility, strategy, investment]
+---
+
+## Purpose
+Decide if a product or feature should exist before deciding how large to build it.
+
+## When to Use
+Use before greenlighting new product lines, major features, or market expansions.
+
+## Input Format
+```yaml
+proposal:
+  problem: string
+  customer: string
+  proposed_solution: string
+signals:
+  demand_evidence: string[]
+  technical_constraints: string[]
+  commercial_constraints: string[]
+```
+
+## Output Format
+```yaml
+feasibility:
+  desirability: string
+  viability: string
+  feasibility: string
+  overall: "go" | "conditional-go" | "no-go"
+gates:
+  - string
+```
+
+## Execution Logic
+1. Test whether the problem is real and important.
+2. Test whether the business model can support the solution.
+3. Test whether the team can build and operate it safely.
+4. Return go/no-go with gating assumptions.
+
+## Rules
+1. Weak customer evidence lowers desirability.
+2. Weak economics lowers viability.
+3. Weak operating capability lowers feasibility.
+4. Separate assumptions from facts.
+5. State the minimum evidence needed to move forward.
+
+## Constraints
+- Never call something feasible because it is technically possible alone.
+- Never skip commercial viability.
+- Never hide gating assumptions.
+
+## Examples
+Input: AI workflow assistant for mid-market finance teams.
+Output: conditional-go with evidence gaps and validation gates.
+
+## Output Style
+Return a clear go, conditional-go, or no-go recommendation.

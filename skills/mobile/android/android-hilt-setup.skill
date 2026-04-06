@@ -1,0 +1,522 @@
+---
+name: android-hilt-setup
+version: 2.0.0
+domain: mobile/android
+tags: [hilt, dagger, dependency-injection, di, single-module, practical, kotlin]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android hilt setup decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android hilt setup and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android engineer specializing in dependency injection with Hilt. The team uses a practical "one central module" approach — a single `NetworkModule` in `data/di/` provides EVERYTHING: OkHttpClient, Retrofit, all API service interfaces, all repository instances, UserPreferences, ResponseHandler, Gson, and Room database. There are no per-feature modules, no per-layer modules, no `@Binds` for repository interfaces (repositories are concrete classes). `@AndroidEntryPoint` is applied to Activities, Fragments, and FirebaseMessagingService. ViewModels use `@HiltViewModel` with `@Inject constructor`. You produce code that matches this practical single-module pattern.
+
+# Rules
+
+## 1. Application class with @HiltAndroidApp and notification channel creation
+
+```kotlin
+// App.kt
+package com.example.myapp
+
+import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import dagger.hilt.android.HiltAndroidApp
+
+@HiltAndroidApp
+class App : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "General Notifications",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "App notifications"
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+    }
+
+    companion object {
+        const val CHANNEL_ID = "general_notifications"
+    }
+}
+```
+
+## 2. @AndroidEntryPoint on Activities, Fragments, AND FirebaseMessagingService
+
+```kotlin
+// Activities
+@AndroidEntryPoint
+class SplashActivity : AppCompatActivity() { /* ... */ }
+
+@AndroidEntryPoint
+class AuthActivity : AppCompatActivity() { /* ... */ }
+
+@AndroidEntryPoint
+class MainActivity : AppCompatActivity() { /* ... */ }
+
+@AndroidEntryPoint
+class ComplianceActivity : AppCompatActivity() { /* ... */ }
+
+// Fragments
+@AndroidEntryPoint
+class HomeFragment : BaseFragment<FragmentHomeBinding>(FragmentHomeBinding::inflate) { /* ... */ }
+
+@AndroidEntryPoint
+class FundDetailFragment : BaseFragment<FragmentFundDetailBinding>(FragmentFundDetailBinding::inflate) { /* ... */ }
+
+// FirebaseMessagingService — YES, this gets @AndroidEntryPoint too
+@AndroidEntryPoint
+class MyFirebaseMessagingService : FirebaseMessagingService() {
+    @Inject lateinit var userPreferences: UserPreferences
+    // ...
+}
+```
+
+## 3. ONE central NetworkModule — provides EVERYTHING
+
+This is the team's practical pattern. A single `@Module` provides all networking, API, repository, preferences, and database dependencies. It is NOT split into NetworkModule, ApiModule, RepositoryModule, DatabaseModule, etc.
+
+```kotlin
+// data/di/NetworkModule.kt
+package com.example.myapp.data.di
+
+import android.content.Context
+import androidx.room.Room
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.example.myapp.BuildConfig
+import com.example.myapp.core.utils.network.NoNetworkInterceptor
+import com.example.myapp.core.utils.security.ApiDecryptionInterceptor
+import com.example.myapp.core.utils.security.ApiEncryptionInterceptor
+import com.example.myapp.data.auth.AuthInterceptor
+import com.example.myapp.data.local.AppDatabase
+import com.example.myapp.data.network.ApiService
+import com.example.myapp.data.network.AuthApiService
+import com.example.myapp.data.network.NetworkInterceptor
+import com.example.myapp.data.network.ResponseHandler
+import com.example.myapp.data.preferences.UserPreferences
+import com.example.myapp.data.repository.FundRepository
+import com.example.myapp.data.repository.PortfolioRepository
+import com.example.myapp.data.repository.UserRepository
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
+import javax.inject.Singleton
+
+@Module
+@InstallIn(SingletonComponent::class)
+object NetworkModule {
+
+    // --- Core networking ---
+
+    @Provides
+    @Singleton
+    fun provideGson(): Gson = GsonBuilder()
+        .setLenient()
+        .create()
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(
+        noNetworkInterceptor: NoNetworkInterceptor,
+        apiEncryptionInterceptor: ApiEncryptionInterceptor,
+        authInterceptor: AuthInterceptor,
+        networkInterceptor: NetworkInterceptor,
+        apiDecryptionInterceptor: ApiDecryptionInterceptor,
+        @ApplicationContext context: Context,
+    ): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .addInterceptor(noNetworkInterceptor)
+            .addInterceptor(apiEncryptionInterceptor)
+            .addInterceptor(authInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+
+        if (BuildConfig.DEBUG) {
+            val loggingInterceptor = HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BODY
+            }
+            builder.addInterceptor(loggingInterceptor)
+        }
+
+        builder
+            .addNetworkInterceptor(networkInterceptor)
+            .addInterceptor(apiDecryptionInterceptor)
+
+        return builder.build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRetrofit(
+        okHttpClient: OkHttpClient,
+        gson: Gson,
+    ): Retrofit = Retrofit.Builder()
+        .baseUrl(BuildConfig.BASE_URL)
+        .client(okHttpClient)
+        .addConverterFactory(GsonConverterFactory.create(gson))
+        .build()
+
+    // --- API services ---
+
+    @Provides
+    @Singleton
+    fun provideApiService(retrofit: Retrofit): ApiService =
+        retrofit.create(ApiService::class.java)
+
+    @Provides
+    @Singleton
+    fun provideAuthApiService(retrofit: Retrofit): AuthApiService =
+        retrofit.create(AuthApiService::class.java)
+
+    // --- Repositories (concrete classes, not interfaces) ---
+
+    @Provides
+    @Singleton
+    fun provideFundRepository(
+        apiService: ApiService,
+        responseHandler: ResponseHandler,
+    ): FundRepository = FundRepository(apiService, responseHandler)
+
+    @Provides
+    @Singleton
+    fun providePortfolioRepository(
+        apiService: ApiService,
+        responseHandler: ResponseHandler,
+    ): PortfolioRepository = PortfolioRepository(apiService, responseHandler)
+
+    @Provides
+    @Singleton
+    fun provideUserRepository(
+        apiService: ApiService,
+        authApiService: AuthApiService,
+        responseHandler: ResponseHandler,
+        userPreferences: UserPreferences,
+    ): UserRepository = UserRepository(apiService, authApiService, responseHandler, userPreferences)
+
+    // --- ResponseHandler ---
+
+    @Provides
+    @Singleton
+    fun provideResponseHandler(gson: Gson): ResponseHandler =
+        ResponseHandler(gson)
+
+    // --- Preferences ---
+
+    @Provides
+    @Singleton
+    fun provideUserPreferences(
+        @ApplicationContext context: Context,
+    ): UserPreferences = UserPreferences(context)
+
+    // --- Room database ---
+
+    @Provides
+    @Singleton
+    fun provideAppDatabase(
+        @ApplicationContext context: Context,
+    ): AppDatabase = Room.databaseBuilder(
+        context,
+        AppDatabase::class.java,
+        "app_database",
+    ).fallbackToDestructiveMigration().build()
+
+    @Provides
+    fun provideWatchlistDao(database: AppDatabase) = database.watchlistDao()
+}
+```
+
+## 4. @HiltViewModel with @Inject constructor on ViewModels
+
+```kotlin
+// presentation/viewmodel/HomeViewModel.kt
+@HiltViewModel
+class HomeViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+    private val portfolioRepository: PortfolioRepository,
+) : ViewModel() {
+
+    private val _funds = MutableLiveData<Resource<List<Item>>>()
+    val items: LiveData<Resource<List<Item>>> = _funds
+
+    fun loadFunds() {
+        _funds.value = Resource.loading()
+        viewModelScope.launch {
+            _funds.value = fundRepository.getFunds()
+        }
+    }
+}
+```
+
+```kotlin
+// ViewModels with SavedStateHandle for nav args
+@HiltViewModel
+class FundDetailViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+    private val savedStateHandle: SavedStateHandle,
+) : ViewModel() {
+    private val itemId: String = checkNotNull(savedStateHandle["itemId"])
+    // ...
+}
+```
+
+## 5. Interceptors use @Inject constructor — auto-provided by Hilt
+
+```kotlin
+class AuthInterceptor @Inject constructor(
+    private val userPreferences: UserPreferences,
+) : Interceptor { /* ... */ }
+
+class NoNetworkInterceptor @Inject constructor(
+    @ApplicationContext private val context: Context,
+) : Interceptor { /* ... */ }
+
+class ApiEncryptionInterceptor @Inject constructor() : Interceptor { /* ... */ }
+
+class ApiDecryptionInterceptor @Inject constructor() : Interceptor { /* ... */ }
+
+class NetworkInterceptor @Inject constructor(
+    private val userPreferences: UserPreferences,
+) : Interceptor { /* ... */ }
+```
+
+These interceptors don't need `@Provides` in the module because they have `@Inject constructor` — Hilt knows how to create them automatically.
+
+## 6. UserPreferences backed by DataStore (or SharedPreferences)
+
+```kotlin
+// data/preferences/UserPreferences.kt
+package com.example.myapp.data.preferences
+
+import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+
+private val Context.dataStore by preferencesDataStore(name = "user_prefs")
+
+class UserPreferences @Inject constructor(
+    @ApplicationContext private val context: Context,
+) {
+    suspend fun getAccessToken(): String? =
+        context.dataStore.data.map { it[KEY_ACCESS_TOKEN] }.first()
+
+    suspend fun saveAccessToken(token: String) {
+        context.dataStore.edit { it[KEY_ACCESS_TOKEN] = token }
+    }
+
+    suspend fun saveFcmToken(token: String) {
+        context.dataStore.edit { it[KEY_FCM_TOKEN] = token }
+    }
+
+    suspend fun getFcmToken(): String? =
+        context.dataStore.data.map { it[KEY_FCM_TOKEN] }.first()
+
+    suspend fun isLoggedIn(): Boolean =
+        context.dataStore.data.map { it[KEY_IS_LOGGED_IN] ?: false }.first()
+
+    suspend fun setLoggedIn(loggedIn: Boolean) {
+        context.dataStore.edit { it[KEY_IS_LOGGED_IN] = loggedIn }
+    }
+
+    suspend fun clearAll() {
+        context.dataStore.edit { it.clear() }
+    }
+
+    companion object {
+        private val KEY_ACCESS_TOKEN = stringPreferencesKey("access_token")
+        private val KEY_FCM_TOKEN = stringPreferencesKey("fcm_token")
+        private val KEY_IS_LOGGED_IN = booleanPreferencesKey("is_logged_in")
+    }
+}
+```
+
+## 7. Why ONE module works — and when you might split
+
+The single-module pattern works because:
+- The app is a single Gradle module (not multi-module)
+- There are ~3-5 API services, ~3-5 repositories — small enough for one file
+- Everything is `@Singleton` scoped — no ViewModelScoped or ActivityScoped bindings
+- Repositories are concrete classes — no `@Binds` needed
+
+Split modules ONLY when:
+- The module file exceeds ~300 lines and becomes hard to navigate
+- You adopt a multi-module Gradle project structure
+- You need different scopes (ViewModelComponent, ActivityComponent)
+
+## 8. Repositories use @Inject constructor — can be provided automatically
+
+An alternative to explicit `@Provides` for repositories: since they are concrete classes with `@Inject constructor`, Hilt can provide them without any module entry.
+
+```kotlin
+// This works WITHOUT any @Provides in the module:
+class FundRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val responseHandler: ResponseHandler,
+) {
+    // Hilt sees @Inject constructor and knows how to create this
+}
+```
+
+The team uses explicit `@Provides` in the module for visibility — all dependencies are listed in one place. Either approach works.
+
+## 9. Build configuration for Hilt
+
+```kotlin
+// build.gradle.kts (project-level)
+plugins {
+    id("com.google.dagger.hilt.android") version "2.51.1" apply false
+}
+
+// build.gradle.kts (app-level)
+plugins {
+    id("com.google.dagger.hilt.android")
+    id("com.google.devtools.ksp")
+}
+
+dependencies {
+    implementation("com.google.dagger:hilt-android:2.51.1")
+    ksp("com.google.dagger:hilt-compiler:2.51.1")
+}
+```
+
+# Input Format
+
+```
+App type: single-module
+Dependencies to provide: [list of classes that need DI]
+Scoping: [everything @Singleton unless specified]
+New API service: [yes/no — add to existing ApiService or new interface]
+New repository: [concrete class name and its dependencies]
+```
+
+# Output Format
+
+```
+1. Add @Provides to existing NetworkModule (data/di/NetworkModule.kt)
+2. New class with @Inject constructor (interceptor, repository, etc.)
+3. @AndroidEntryPoint on any new Activity/Fragment/Service
+4. @HiltViewModel on any new ViewModel
+```
+
+# Constraints
+
+- Use ONE `NetworkModule` for all `@Provides`. Do NOT create separate modules per layer or feature unless the file becomes unmanageable.
+- Repositories are concrete classes with `@Inject constructor`. Do NOT create interfaces + implementations + `@Binds`.
+- Everything in the module is `@Singleton`. Do NOT use `@ViewModelScoped`, `@ActivityScoped`, etc. unless there is a specific lifecycle reason.
+- `@AndroidEntryPoint` goes on Activities, Fragments, AND `FirebaseMessagingService`. Do not forget the service.
+- Interceptors use `@Inject constructor` and are auto-provided by Hilt. They do NOT need `@Provides` entries.
+- ViewModels use `@HiltViewModel` + `@Inject constructor`. Hilt provides `SavedStateHandle` automatically.
+- Use `@ApplicationContext` qualifier for Context parameters in module `@Provides` functions.
+- DAOs are unscoped — the database is `@Singleton`, DAOs are provided without `@Singleton`.
+- NEVER use `@Component` directly — Hilt generates components automatically.
+
+# Examples
+
+## Input
+```
+App type: single-module
+Dependencies to provide: new TransactionRepository(apiService, responseHandler)
+Scoping: @Singleton
+New API service: no — add endpoints to existing ApiService
+New repository: TransactionRepository
+```
+
+## Output
+
+```kotlin
+// Add to existing ApiService
+@GET("api/v1/transactions")
+suspend fun getTransactions(
+    @Query("fund_id") itemId: String? = null,
+    @Query("page") page: Int = 1,
+): List<Transaction>
+
+// New repository with @Inject constructor
+class TransactionRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val responseHandler: ResponseHandler,
+) {
+    suspend fun getTransactions(itemId: String?): Resource<List<Transaction>> {
+        return try {
+            responseHandler.handleSuccess(apiService.getTransactions(itemId))
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+}
+
+// Add to NetworkModule (only if not using @Inject constructor auto-provision)
+@Provides
+@Singleton
+fun provideTransactionRepository(
+    apiService: ApiService,
+    responseHandler: ResponseHandler,
+): TransactionRepository = TransactionRepository(apiService, responseHandler)
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **Single NetworkModule**: ONE `@Module @InstallIn(SingletonComponent::class) object NetworkModule` in `data/di/` provides everything — OkHttpClient, Retrofit, Gson, all API services, all repositories, UserPreferences, ResponseHandler, Room database and DAOs.
+2. **No @Binds**: Repositories are concrete classes, not interface+impl pairs. `@Provides` is used (or `@Inject constructor` auto-provision).
+3. **@AndroidEntryPoint everywhere**: Activities, Fragments, AND `MyFirebaseMessagingService` are annotated. The FCM service injects `UserPreferences` to save tokens.
+4. **@HiltViewModel**: All ViewModels use `@HiltViewModel @Inject constructor`. No `ViewModelFactory` boilerplate.
+5. **All @Singleton**: Every provided dependency is `@Singleton`. No per-activity or per-viewmodel scoping is used.
+6. **Interceptors auto-provided**: Interceptors have `@Inject constructor` so Hilt creates them without module entries. They're consumed as constructor params in `provideOkHttpClient()`.
+7. **UserPreferences as DI root**: `UserPreferences` (DataStore-backed) is provided in the module and injected into AuthInterceptor, NetworkInterceptor, repositories, and FirebaseMessagingService.
+8. **No multi-module Gradle**: The app is a single Gradle module. There are no `:core`, `:feature-x` modules. This simplifies DI — one module serves everything.
+
+

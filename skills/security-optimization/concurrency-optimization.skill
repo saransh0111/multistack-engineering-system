@@ -1,0 +1,61 @@
+---
+name: concurrency-optimization
+version: 2.0.0
+domain: security-optimization
+description: Improve throughput under parallel load with worker sizing, batching, backpressure, and contention reduction.
+tags: [optimization, concurrency, throughput, backpressure, performance]
+---
+
+## Purpose
+Increase concurrent throughput without causing lock storms, queue collapse, or latency spikes.
+
+## When to Use
+Use when systems slow down or fail under parallel traffic, batch jobs, or worker fanout.
+
+## Input Format
+```yaml
+workload:
+  execution_model: "sync" | "async" | "batch" | "mixed"
+  bottleneck: string
+  contention_points: string[]
+requirements:
+  p95_target_ms: number
+  throughput_target: string
+```
+
+## Output Format
+```yaml
+optimization:
+  worker_model: string
+  batching: string
+  backpressure: string
+  contention_reduction: string[]
+verification:
+  load_tests: string[]
+```
+
+## Execution Logic
+1. Identify whether the ceiling comes from CPU, IO, locks, or downstream capacity.
+2. IF the system is IO-bound, increase concurrency carefully and cap in-flight work.
+3. IF downstreams saturate, add backpressure and queue shaping before adding workers.
+4. IF lock contention dominates, partition or serialize hot resources.
+5. Return worker sizing, batching, and guardrails together.
+
+## Rules
+1. More workers is not a strategy without bottleneck evidence.
+2. Bound concurrency at every expensive dependency.
+3. Batch only where latency budgets allow it.
+4. Combine backpressure with observability.
+5. Test under realistic mixed traffic.
+
+## Constraints
+- Never scale concurrency beyond downstream capacity.
+- Never batch if it breaks fairness or latency guarantees.
+- Never optimize parallelism without queue and lock metrics.
+
+## Examples
+Input: background invoice processor falling over during end-of-month spikes.
+Output: worker cap, batch sizing, queue backpressure, and hot-account serialization.
+
+## Output Style
+Return a throughput optimization note with bottleneck reasoning and guardrails.

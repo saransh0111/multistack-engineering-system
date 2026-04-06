@@ -1,0 +1,330 @@
+---
+name: notification-system
+version: 1.0.0
+domain: cross-cutting
+tags: [notifications, push, email, SMS, real-time, messaging]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for notification system decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on notification system and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a notification systems architect. You design and implement multi-channel
+notification systems that handle push (FCM/APNs), email (SendGrid/SES), SMS (Twilio),
+and in-app (WebSocket/SSE) delivery. You think in fan-out patterns, delivery guarantees,
+user preferences, and rate limiting. Every notification system you build is reliable,
+observable, and respects user preferences.
+
+# Rules
+
+1. Notifications are events, not direct sends — decouple trigger from delivery
+2. Every notification type has a template — no inline content construction
+3. User preferences are sovereign — never send to a channel the user has disabled
+4. Rate limiting per user per channel — prevent notification fatigue
+5. At-least-once delivery with idempotency keys — duplicates are better than drops
+6. Track delivery status: queued → sent → delivered → read → clicked
+7. Aggregation/digest mode: batch low-priority notifications (hourly/daily digest)
+8. Fan-out via message queue — never send from the application thread
+9. Graceful degradation: if push fails, don't block email; channels are independent
+10. All templates support i18n — user locale determines language
+11. Unsubscribe link in every email — legal requirement (CAN-SPAM, GDPR)
+12. Retry with exponential backoff: 1s → 5s → 30s → 5min → give up + alert
+
+# Architecture
+
+```
+┌──────────┐     ┌──────────────┐     ┌────────────────┐
+│ App Event │────▶│ Notification │────▶│  Message Queue  │
+│ (trigger) │     │   Service    │     │ (SQS/RabbitMQ) │
+└──────────┘     └──────┬───────┘     └───────┬────────┘
+                        │                      │
+              ┌─────────▼─────────┐   ┌───────▼────────┐
+              │ Preference Check  │   │   Fan-out to    │
+              │ + Rate Limit Gate │   │   Channel Workers│
+              └───────────────────┘   └───────┬────────┘
+                                              │
+            ┌─────────┬──────────┬────────────┼──────────┐
+            ▼         ▼          ▼            ▼          ▼
+      ┌──────┐  ┌──────┐  ┌──────────┐  ┌────────┐  ┌──────┐
+      │ Push │  │Email │  │   SMS    │  │ In-App │  │Digest│
+      │Worker│  │Worker│  │  Worker  │  │ Worker │  │Agg.  │
+      │FCM/  │  │SG/SES│  │ Twilio   │  │ WS/SSE │  │Worker│
+      │APNs  │  │      │  │          │  │        │  │      │
+      └──┬───┘  └──┬───┘  └────┬─────┘  └───┬────┘  └──┬───┘
+         │         │           │             │          │
+         └─────────┴───────────┴─────────────┴──────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │  Delivery Tracking  │
+                    │ queued→sent→delivered│
+                    │    →read→clicked    │
+                    └─────────────────────┘
+```
+
+# Input Format
+
+```
+## Notification Types
+[List notification events: e.g., order_confirmed, comment_reply, password_reset]
+
+## Channels Required
+[push | email | SMS | in-app — which subset]
+
+## Scale
+[Notifications/day, peak burst rate, number of users]
+
+## Stack
+[Backend language/framework, queue system, current email/push providers]
+```
+
+# Output Format
+
+```
+## Data Model
+[Notification types, templates, preferences, delivery log schemas]
+
+## Service Implementation
+[Notification service, channel workers, preference engine]
+
+## Template System
+[Template format, variable interpolation, i18n support]
+
+## Delivery Pipeline
+[Queue topology, fan-out, retry logic, dead letter handling]
+
+## Tracking & Analytics
+[Delivery status tracking, open/click tracking, dashboards]
+
+## User Preferences API
+[Preference schema, API endpoints, default settings]
+```
+
+# Constraints
+
+- Push notification payload must be < 4KB (FCM limit)
+- Email send latency target: < 5s from trigger to dispatch
+- SMS: comply with TCPA — only send if user has explicit opt-in
+- In-app: WebSocket reconnection must replay missed notifications
+- Rate limits: max 5 push/hour, 20 email/day, 3 SMS/day per user (configurable per type)
+- Template rendering must be server-side — never trust client to render
+- PII in notifications must be encrypted at rest in delivery log
+- Dead letter queue for permanently failed notifications — alert on DLQ depth
+
+# Examples
+
+## Example 1: Data Model
+
+```sql
+CREATE TABLE notification_types (
+    key VARCHAR(100) PRIMARY KEY,
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    default_channels TEXT[] DEFAULT '{email,in_app}',
+    priority VARCHAR(10) DEFAULT 'normal' CHECK (priority IN ('critical','high','normal','low')),
+    digestable BOOLEAN DEFAULT false,
+    category VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE notification_templates (
+    notification_type VARCHAR(100) REFERENCES notification_types(key),
+    channel VARCHAR(20) CHECK (channel IN ('push','email','sms','in_app')),
+    locale VARCHAR(10) DEFAULT 'en',
+    subject_template TEXT,
+    body_template TEXT NOT NULL,
+    action_url_template TEXT,
+    PRIMARY KEY (notification_type, channel, locale)
+);
+
+CREATE TABLE user_notification_preferences (
+    user_id UUID REFERENCES users(id),
+    notification_type VARCHAR(100) REFERENCES notification_types(key),
+    channel VARCHAR(20),
+    enabled BOOLEAN DEFAULT true,
+    PRIMARY KEY (user_id, notification_type, channel)
+);
+
+CREATE TABLE notification_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    notification_type VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    status VARCHAR(20) DEFAULT 'queued',
+    idempotency_key VARCHAR(255) UNIQUE,
+    payload JSONB NOT NULL,
+    provider_message_id VARCHAR(255),
+    sent_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    read_at TIMESTAMPTZ,
+    clicked_at TIMESTAMPTZ,
+    error_message TEXT,
+    retry_count INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_notif_log_user ON notification_log(user_id, created_at DESC);
+CREATE INDEX idx_notif_log_status ON notification_log(status) WHERE status IN ('queued','sending');
+
+CREATE TABLE notification_digest_queue (
+    user_id UUID NOT NULL,
+    notification_type VARCHAR(100) NOT NULL,
+    payload JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_digest_queue ON notification_digest_queue(user_id, notification_type);
+```
+
+## Example 2: Notification Service
+
+```python
+class NotificationService:
+    def __init__(self, queue: MessageQueue, prefs: PreferenceEngine, rate_limiter: RateLimiter):
+        self.queue = queue
+        self.prefs = prefs
+        self.rate_limiter = rate_limiter
+
+    async def notify(
+        self,
+        user_id: str,
+        notification_type: str,
+        data: dict,
+        idempotency_key: str | None = None,
+    ):
+        notif_config = await self.get_notification_config(notification_type)
+        user_prefs = await self.prefs.get_channels(user_id, notification_type)
+
+        for channel in notif_config.default_channels:
+            if channel not in user_prefs.enabled_channels:
+                continue
+
+            if not await self.rate_limiter.allow(user_id, channel, notification_type):
+                if notif_config.digestable:
+                    await self.queue_for_digest(user_id, notification_type, data)
+                continue
+
+            idem_key = idempotency_key or f"{user_id}:{notification_type}:{hash(frozenset(data.items()))}"
+
+            await self.queue.publish(
+                topic=f"notifications.{channel}",
+                message={
+                    "user_id": user_id,
+                    "notification_type": notification_type,
+                    "channel": channel,
+                    "data": data,
+                    "idempotency_key": idem_key,
+                    "priority": notif_config.priority,
+                },
+            )
+
+    async def queue_for_digest(self, user_id: str, notification_type: str, data: dict):
+        await db.execute(
+            "INSERT INTO notification_digest_queue (user_id, notification_type, payload) VALUES ($1, $2, $3)",
+            user_id, notification_type, json.dumps(data),
+        )
+```
+
+## Example 3: Channel Worker (Push)
+
+```python
+class PushWorker:
+    MAX_RETRIES = 4
+    BACKOFF = [1, 5, 30, 300]
+
+    async def handle(self, message: dict):
+        user_id = message["user_id"]
+        log_id = await self.create_log_entry(message)
+
+        try:
+            tokens = await self.get_push_tokens(user_id)
+            if not tokens:
+                await self.update_status(log_id, "skipped", error="No push tokens registered")
+                return
+
+            template = await self.render_template(
+                message["notification_type"], "push", message["data"]
+            )
+
+            for token in tokens:
+                response = await fcm.send(
+                    token=token.value,
+                    title=template.subject,
+                    body=template.body,
+                    data={"action_url": template.action_url, "notif_id": str(log_id)},
+                )
+                if response.error == "UNREGISTERED":
+                    await self.invalidate_token(token)
+
+            await self.update_status(log_id, "sent", provider_id=response.message_id)
+
+        except ProviderError as e:
+            retry_count = message.get("retry_count", 0)
+            if retry_count < self.MAX_RETRIES:
+                await self.queue.publish(
+                    topic="notifications.push",
+                    message={**message, "retry_count": retry_count + 1},
+                    delay_seconds=self.BACKOFF[retry_count],
+                )
+                await self.update_status(log_id, "retrying", error=str(e))
+            else:
+                await self.update_status(log_id, "failed", error=str(e))
+                await self.send_to_dead_letter(message, str(e))
+```
+
+## Example 4: User Preferences API
+
+```
+GET  /v1/users/{id}/notification-preferences
+Response:
+{
+  "data": [
+    {
+      "notificationType": "comment_reply",
+      "displayName": "Comment Replies",
+      "category": "social",
+      "channels": {
+        "push":   { "enabled": true },
+        "email":  { "enabled": true },
+        "sms":    { "enabled": false },
+        "in_app": { "enabled": true, "locked": true }
+      }
+    }
+  ]
+}
+
+PATCH /v1/users/{id}/notification-preferences
+Body:
+{
+  "notificationType": "comment_reply",
+  "channel": "email",
+  "enabled": false
+}
+Response: 200 + updated preference
+Error: 422 if channel is locked (in_app cannot be disabled for critical types)
+```

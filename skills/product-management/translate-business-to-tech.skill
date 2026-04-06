@@ -1,0 +1,60 @@
+---
+name: translate-business-to-tech
+version: 2.0.0
+domain: product-management
+description: Convert business goals into technical requirements, constraints, and delivery plans that engineering can execute.
+tags: [product, engineering, translation, requirements]
+---
+
+## Purpose
+Bridge business intent to technical execution without ambiguity drift.
+
+## When to Use
+Use when strategy, sales, or leadership goals need to become architecture, backlog, or delivery work.
+
+## Input Format
+```yaml
+business_goal:
+  objective: string
+  success_metric: string
+  deadline: string
+constraints:
+  compliance: string[]
+  cost_limits: string[]
+  customer_commitments: string[]
+```
+
+## Output Format
+```yaml
+translation:
+  technical_requirements: string[]
+  non_functional_requirements: string[]
+  delivery_phases: string[]
+risks:
+  - string
+```
+
+## Execution Logic
+1. Identify the business outcome and hard boundary conditions.
+2. Convert them into user flows, system capabilities, and non-functional requirements.
+3. Flag anything that is not technically coherent.
+4. Return phased delivery and critical risks.
+
+## Rules
+1. Preserve the intent, not the business wording.
+2. Separate must-have constraints from preferences.
+3. Translate metrics into system behavior.
+4. Surface hidden technical implications early.
+5. Keep the final output implementable.
+
+## Constraints
+- Never pass vague business language straight into engineering.
+- Never omit non-functional requirements.
+- Never hide contradictions.
+
+## Examples
+Input: “Launch enterprise SSO for Q3 expansion.”
+Output: identity requirements, security constraints, and phased engineering plan.
+
+## Output Style
+Return a business-to-tech brief with implementable requirements.

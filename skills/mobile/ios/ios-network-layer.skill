@@ -1,0 +1,673 @@
+---
+name: iOS Network Layer
+version: 3.0.0
+domain: mobile/ios
+tags: [networking, urlsession, async-await, codable, interceptor, encryption, modern, production-patterns]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for ios network layer decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on ios network layer and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior iOS engineer building production network layers using modern Swift concurrency.
+The primary approach is URLSession + async/await with a typed Endpoint protocol, generic request
+methods, and structured error handling. For existing codebases that use Alamofire, you can maintain
+that pattern but guide migration toward native URLSession. You understand encryption interceptors
+for sensitive traffic, generic APIResponseModel<T> wrappers, and the team's error types. All new
+networking code uses async/await — no completion handlers, no Combine publishers for HTTP requests.
+
+# Rules
+
+## 1. Modern approach — URLSession + async/await with Endpoint protocol
+
+The standard pattern uses a protocol-based endpoint system with a generic APIClient.
+
+```swift
+protocol Endpoint {
+    var path: String { get }
+    var method: HTTPMethod { get }
+    var headers: [String: String] { get }
+    var queryItems: [URLQueryItem]? { get }
+    var body: Encodable? { get }
+}
+
+extension Endpoint {
+    var headers: [String: String] { ["Content-Type": "application/json"] }
+    var queryItems: [URLQueryItem]? { nil }
+    var body: Encodable? { nil }
+}
+
+enum HTTPMethod: String {
+    case get = "GET"
+    case post = "POST"
+    case put = "PUT"
+    case patch = "PATCH"
+    case delete = "DELETE"
+}
+```
+
+## 2. Typed endpoint enums per domain
+
+Each API domain gets its own enum conforming to Endpoint.
+
+```swift
+enum AuthEndpoint: Endpoint {
+    case login(phone: String)
+    case verifyOTP(phone: String, otp: String, requestId: String)
+    case refreshToken(token: String)
+    case logout
+
+    var path: String {
+        switch self {
+        case .login:        return "/api/v1/auth/login"
+        case .verifyOTP:    return "/api/v1/auth/verify-otp"
+        case .refreshToken: return "/api/v1/auth/refresh"
+        case .logout:       return "/api/v1/auth/logout"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .login, .verifyOTP, .refreshToken: return .post
+        case .logout: return .delete
+        }
+    }
+
+    var body: Encodable? {
+        switch self {
+        case .login(let phone):
+            return ["phone": phone]
+        case .verifyOTP(let phone, let otp, let requestId):
+            return ["phone": phone, "otp": otp, "request_id": requestId]
+        case .refreshToken(let token):
+            return ["refresh_token": token]
+        case .logout:
+            return nil
+        }
+    }
+}
+
+enum PortfolioEndpoint: Endpoint {
+    case dashboard
+    case records
+    case holdingDetail(id: String)
+    case transactions(page: Int, limit: Int)
+    case createSIP(itemId: String, amount: Double, frequency: String)
+
+    var path: String {
+        switch self {
+        case .dashboard:     return "/api/v1/dashboard"
+        case .records:      return "/api/v1/accountSummary/records"
+        case .holdingDetail(let id): return "/api/v1/accountSummary/records/\(id)"
+        case .transactions:  return "/api/v1/transactions"
+        case .createSIP:     return "/api/v1/recurringPlan/create"
+        }
+    }
+
+    var method: HTTPMethod {
+        switch self {
+        case .dashboard, .records, .holdingDetail, .transactions: return .get
+        case .createSIP: return .post
+        }
+    }
+
+    var queryItems: [URLQueryItem]? {
+        switch self {
+        case .transactions(let page, let limit):
+            return [
+                URLQueryItem(name: "page", value: "\(page)"),
+                URLQueryItem(name: "limit", value: "\(limit)")
+            ]
+        default: return nil
+        }
+    }
+
+    var body: Encodable? {
+        switch self {
+        case .createSIP(let itemId, let amount, let frequency):
+            return ["fund_id": itemId, "amount": amount, "frequency": frequency] as [String: Any]
+        default: return nil
+        }
+    }
+}
+```
+
+## 3. APIClient — async/await, generic, with auth token injection
+
+```swift
+actor APIClient {
+    static let shared = APIClient()
+
+    private let baseURL: URL
+    private let session: URLSession
+    private let decoder: JSONDecoder
+
+    init(
+        baseURL: URL = URL(string: AppConfig.baseURL)!,
+        session: URLSession = .shared,
+        decoder: JSONDecoder = .apiDecoder
+    ) {
+        self.baseURL = baseURL
+        self.session = session
+        self.decoder = decoder
+    }
+
+    func request<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
+        let urlRequest = try buildRequest(endpoint)
+        let (data, response) = try await session.data(for: urlRequest)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.unknown
+        }
+
+        try validateResponse(httpResponse, data: data)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    func requestWithEnvelope<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
+        let response: APIResponse = try await request(endpoint)
+        guard let result = response.decoder(with: T.self) else {
+            throw NetworkError.decodingFailed(
+                DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "data field was nil"))
+            )
+        }
+        return result
+    }
+
+    func requestVoid(_ endpoint: Endpoint) async throws {
+        let urlRequest = try buildRequest(endpoint)
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.unknown
+        }
+        try validateResponse(httpResponse, data: data)
+    }
+
+    private func buildRequest(_ endpoint: Endpoint) throws -> URLRequest {
+        var components = URLComponents(url: baseURL.appendingPathComponent(endpoint.path),
+                                       resolvingAgainstBaseURL: true)!
+        components.queryItems = endpoint.queryItems
+
+        guard let url = components.url else {
+            throw NetworkError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = endpoint.method.rawValue
+        request.timeoutInterval = 30
+
+        for (key, value) in endpoint.headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        if let token = AppState.shared.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        request.setValue(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+                         forHTTPHeaderField: "X-App-Version")
+        request.setValue("ios", forHTTPHeaderField: "X-Platform")
+
+        if let body = endpoint.body {
+            request.httpBody = try JSONSerialization.data(
+                withJSONObject: body, options: []
+            )
+        }
+
+        return request
+    }
+
+    private func validateResponse(_ response: HTTPURLResponse, data: Data) throws {
+        switch response.statusCode {
+        case 200...299:
+            return
+        case 401:
+            throw NetworkError.unauthorized
+        case 422:
+            if let errorResponse = try? JSONDecoder().decode(ValidationErrorResponse.self, from: data) {
+                throw NetworkError.validationFailed(errorResponse.errors)
+            }
+            throw NetworkError.serverError(422)
+        case 400...499:
+            if let errorResponse = try? JSONDecoder().decode(APIErrorResponse.self, from: data) {
+                throw NetworkError.requestFailed(errorResponse.message ?? "Request failed")
+            }
+            throw NetworkError.serverError(response.statusCode)
+        case 500...599:
+            throw NetworkError.serverError(response.statusCode)
+        default:
+            throw NetworkError.unknown
+        }
+    }
+}
+```
+
+## 4. APIResponse wrapper with decoder helper
+
+Backend wraps all responses in a standard envelope. The `decoder(with:)` helper extracts typed data.
+
+```swift
+struct APIResponse: Decodable {
+    let status: Bool?
+    let message: String?
+    let data: AnyCodable?
+    let errors: [String: [String]]?
+
+    func decoder<T: Decodable>(with type: T.Type) -> T? {
+        guard let data = self.data else { return nil }
+        do {
+            let jsonData = try JSONEncoder().encode(data)
+            return try JSONDecoder.apiDecoder.decode(T.self, from: jsonData)
+        } catch {
+            #if DEBUG
+            print("Decoding error for \(T.self): \(error)")
+            #endif
+            return nil
+        }
+    }
+}
+
+struct APIResponseModel<T: Decodable>: Decodable {
+    let status: Bool?
+    let message: String?
+    let data: T?
+    let errors: [String: [String]]?
+}
+```
+
+## 5. Error types
+
+```swift
+enum NetworkError: LocalizedError {
+    case noConnection
+    case unauthorized
+    case serverError(Int)
+    case decodingFailed(Error)
+    case requestFailed(String)
+    case validationFailed([String: [String]])
+    case timeout
+    case invalidURL
+    case unknown
+
+    var errorDescription: String? {
+        switch self {
+        case .noConnection:       return "No internet connection."
+        case .unauthorized:       return "Session expired. Please login again."
+        case .serverError(let c): return "Server error (\(c)). Please try again."
+        case .decodingFailed:     return "Unable to process response."
+        case .requestFailed(let m): return m
+        case .validationFailed(let errors):
+            return errors.values.flatMap { $0 }.joined(separator: "\n")
+        case .timeout:            return "Request timed out."
+        case .invalidURL:         return "Invalid request URL."
+        case .unknown:            return "Something went wrong."
+        }
+    }
+}
+
+struct APIErrorResponse: Decodable {
+    let status: Bool?
+    let message: String?
+}
+
+struct ValidationErrorResponse: Decodable {
+    let errors: [String: [String]]
+}
+```
+
+## 6. Token refresh with actor isolation
+
+Token refresh is an actor-isolated operation to prevent concurrent refresh races.
+
+```swift
+extension APIClient {
+    private func refreshTokenIfNeeded() async throws {
+        guard let refreshToken = TokenManager.shared.refreshToken else {
+            throw NetworkError.unauthorized
+        }
+        let response: AuthTokenResponse = try await request(
+            AuthEndpoint.refreshToken(token: refreshToken)
+        )
+        TokenManager.shared.saveTokens(
+            access: response.accessToken,
+            refresh: response.refreshToken
+        )
+    }
+
+    func requestWithAutoRefresh<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
+        do {
+            return try await request(endpoint)
+        } catch NetworkError.unauthorized {
+            try await refreshTokenIfNeeded()
+            return try await request(endpoint)
+        }
+    }
+}
+```
+
+## 7. Encryption for sensitive endpoints
+
+Certain endpoints (login, OTP) encrypt the request body. This is handled
+as a URLRequest transform, not an Alamofire interceptor.
+
+```swift
+struct EncryptedEndpointWrapper: Endpoint {
+    let wrapped: Endpoint
+    private let encryptionHelper = ApiEncryptionHelper()
+
+    var path: String { wrapped.path }
+    var method: HTTPMethod { wrapped.method }
+    var queryItems: [URLQueryItem]? { wrapped.queryItems }
+    var headers: [String: String] {
+        var h = wrapped.headers
+        h["X-Encrypted"] = "true"
+        h["Content-Type"] = "application/octet-stream"
+        return h
+    }
+
+    var body: Encodable? {
+        guard let originalBody = wrapped.body else { return nil }
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: originalBody),
+              let encrypted = try? encryptionHelper.encrypt(data: jsonData) else {
+            return nil
+        }
+        return encrypted
+    }
+}
+
+// Usage in ViewModel:
+let endpoint = EncryptedEndpointWrapper(wrapped: AuthEndpoint.login(phone: "+91999..."))
+let response: AuthResponse = try await APIClient.shared.request(endpoint)
+```
+
+## 8. Custom JSONDecoder with multiple date formats
+
+```swift
+extension JSONDecoder {
+    static let apiDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+
+            let formatters: [DateFormatter] = [
+                .iso8601Full, .iso8601DateOnly, .backendDateTime, .backendDateOnly
+            ]
+            for formatter in formatters {
+                if let date = formatter.date(from: dateString) { return date }
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Cannot decode date: \(dateString)"
+            )
+        }
+        return decoder
+    }()
+}
+
+extension DateFormatter {
+    static let iso8601Full: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static let iso8601DateOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static let backendDateTime: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "dd-MM-yyyy HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static let backendDateOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "dd-MM-yyyy"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+}
+```
+
+## 9. Debug logging
+
+```swift
+#if DEBUG
+struct APILogger {
+    static func log(_ request: URLRequest) {
+        let method = request.httpMethod ?? "?"
+        let url = request.url?.absoluteString ?? "?"
+        print("📡 [\(method)] \(url)")
+        if let body = request.httpBody, let str = String(data: body, encoding: .utf8) {
+            print("   Body: \(str.prefix(500))")
+        }
+    }
+
+    static func log(_ response: HTTPURLResponse, data: Data) {
+        let code = response.statusCode
+        let emoji = (200...299).contains(code) ? "✅" : "❌"
+        print("\(emoji) [\(code)] \(response.url?.absoluteString ?? "")")
+        if let body = String(data: data, encoding: .utf8) {
+            print("   Body: \(body.prefix(500))")
+        }
+    }
+}
+#endif
+```
+
+## 10. TokenManager with Keychain storage
+
+```swift
+class TokenManager {
+    static let shared = TokenManager()
+    private init() {}
+
+    var accessToken: String? {
+        get { KeychainHelper.read(key: "access_token") }
+        set {
+            if let value = newValue {
+                KeychainHelper.save(key: "access_token", value: value)
+            } else {
+                KeychainHelper.delete(key: "access_token")
+            }
+            AppState.shared.accessToken = newValue
+        }
+    }
+
+    var refreshToken: String? {
+        get { KeychainHelper.read(key: "refresh_token") }
+        set {
+            if let value = newValue {
+                KeychainHelper.save(key: "refresh_token", value: value)
+            } else {
+                KeychainHelper.delete(key: "refresh_token")
+            }
+        }
+    }
+
+    func saveTokens(access: String, refresh: String) {
+        accessToken = access
+        refreshToken = refresh
+    }
+
+    func clearTokens() {
+        accessToken = nil
+        refreshToken = nil
+    }
+}
+```
+
+## 11. Codable models — no separate DTO layer
+
+Models use CodingKeys when backend names differ. `keyDecodingStrategy = .convertFromSnakeCase`
+handles most cases, CodingKeys for the rest.
+
+```swift
+struct UserModel: Codable, Identifiable {
+    let id: String
+    let name: String
+    let email: String
+    let phone: String?
+    let panNumber: String?
+    let kycStatus: String?
+    let profileImageUrl: String?
+    let createdAt: Date?
+}
+
+struct ProductModel: Codable, Identifiable {
+    let id: String
+    let name: String
+    let category: String
+    let nav: Double
+    let returnOneYear: Double?
+    let returnThreeYear: Double?
+    let riskLevel: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, category, nav
+        case returnOneYear = "return_1y"
+        case returnThreeYear = "return_3y"
+        case riskLevel = "risk_level"
+    }
+}
+```
+
+## 12. Usage in @Observable ViewModel
+
+```swift
+@Observable
+class DashboardViewModel {
+    var dashboard: DashboardModel?
+    var isLoading = false
+    var error: NetworkError?
+
+    func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            dashboard = try await APIClient.shared.requestWithEnvelope(
+                PortfolioEndpoint.dashboard
+            )
+        } catch let networkError as NetworkError {
+            error = networkError
+        } catch {
+            self.error = .unknown
+        }
+    }
+}
+```
+
+# Input Format
+
+```
+Endpoints:
+  - [HTTP method] [path] → [Response type]
+Base URL: [environment-based URL]
+Auth: [Bearer token from TokenManager.shared]
+Encryption: [yes/no — which endpoints]
+Error Handling: [NetworkError + ValidationErrorResponse for field validation]
+```
+
+# Output Format
+
+```
+// MARK: - Endpoint (protocol conformance per domain)
+enum [Domain]Endpoint: Endpoint { ... }
+
+// MARK: - APIClient (actor, async/await)
+actor APIClient { ... }
+
+// MARK: - Response Models (Codable)
+struct APIResponse: Decodable { ... }
+
+// MARK: - Error Types
+enum NetworkError: LocalizedError { ... }
+
+// MARK: - Usage in ViewModel
+@Observable class [Feature]ViewModel { func load() async { ... } }
+```
+
+# Constraints
+
+- All new networking MUST use async/await. No completion handlers for new code.
+- APIClient MUST be an actor to prevent data races on token refresh.
+- Endpoints MUST conform to the Endpoint protocol — no scattered URL strings.
+- APIResponse.decoder(with:) extracts typed payloads from the response envelope.
+- Token injection happens in APIClient.buildRequest(), not in individual call sites.
+- Encrypted endpoints wrap the original endpoint, not modify the APIClient.
+- JSONDecoder MUST handle multiple date formats from the backend.
+- NetworkError MUST be LocalizedError with user-friendly messages.
+- No force unwraps on URL construction or response parsing.
+- Debug logging is #if DEBUG guarded.
+- Models use .convertFromSnakeCase + explicit CodingKeys only when needed.
+
+# Legacy: Alamofire pattern (older codebases)
+
+Some production apps still use Alamofire ~> 5.4. This pattern is maintained
+for the existing codebase but is NOT used for new projects:
+
+- `NetworkManager.shared` — Alamofire Session singleton with interceptors
+- `NetworkService` — facade with `request(post:params:completion:)` methods
+- `Endpoint` enum (not protocol) — maps cases to path strings
+- Callback-based: `Result<APIResponse?, NetworkError>` with `DispatchQueue.main.async`
+- `ApiEncryptionInterceptor` — Alamofire `RequestInterceptor` for login/OTP
+
+Migration path: wrap existing Alamofire calls in async/await using
+`withCheckedThrowingContinuation` during incremental migration.
+
+```swift
+extension NetworkService {
+    func request(endpoint: Endpoint, params: [String: Any] = [:]) async throws -> APIResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            request(post: endpoint, params: params) { result in
+                switch result {
+                case .success(let response):
+                    if let response {
+                        continuation.resume(returning: response)
+                    } else {
+                        continuation.resume(throwing: NetworkError.unknown)
+                    }
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+```

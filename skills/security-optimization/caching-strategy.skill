@@ -1,0 +1,63 @@
+---
+name: caching-strategy
+version: 2.0.0
+domain: security-optimization
+description: Choose cache patterns, invalidation methods, TTLs, and safety boundaries for performance-critical systems.
+tags: [optimization, caching, redis, invalidation, performance]
+---
+
+## Purpose
+Improve latency and cost without serving unsafe or misleading data.
+
+## When to Use
+Use for read-heavy endpoints, repeated computations, expensive third-party calls, and session-adjacent data.
+
+## Input Format
+```yaml
+workload:
+  data_type: string
+  read_frequency: string
+  write_frequency: string
+  consistency_tolerance: "low" | "medium" | "high"
+requirements:
+  tenant_isolation: boolean
+  personalized: boolean
+```
+
+## Output Format
+```yaml
+cache_plan:
+  pattern: string
+  key_strategy: string
+  ttl: string
+  invalidation: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Measure whether the hot path is cacheable and safe to cache.
+2. IF writes are infrequent and stale tolerance exists, use cache-aside.
+3. IF the system needs durable precomputation, consider materialized views or projection caches.
+4. IF data is personalized or security-sensitive, scope keys tightly and limit shared caching.
+5. Return invalidation and fallback behavior with the cache choice.
+
+## Rules
+1. Invalidation strategy matters more than cache placement.
+2. Include tenant and auth context in keys when relevant.
+3. Use negative caching carefully and briefly.
+4. Protect origin systems from thundering herds with locking or request coalescing.
+5. Measure hit rate, stale serve rate, and origin fallback latency.
+
+## Constraints
+- Never cache data across tenant or auth boundaries accidentally.
+- Never cache mutable critical balances without explicit freshness design.
+- Never add Redis just because latency is high without measuring root cause.
+
+## Examples
+Input: tenant configuration endpoint called on every app bootstrap.
+Output: cache-aside Redis with tenant-scoped keys, event-driven invalidation, and short fallback TTL.
+
+## Output Style
+Return a cache decision brief with invalidation and safety notes.

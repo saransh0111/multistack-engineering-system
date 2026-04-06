@@ -1,0 +1,62 @@
+---
+name: database-optimization
+version: 2.0.0
+domain: security-optimization
+description: Optimize database performance through indexing, query shape, partitioning, workload isolation, and measurement.
+tags: [optimization, database, indexing, queries, performance]
+---
+
+## Purpose
+Improve database throughput and latency using structural fixes before hardware-only scaling.
+
+## When to Use
+Use when database load, slow queries, or lock contention constrain product performance or cost.
+
+## Input Format
+```yaml
+database:
+  engine: string
+  hot_queries: string[]
+  write_intensity: "low" | "medium" | "high"
+symptoms:
+  latency: string
+  locks: boolean
+  cpu_or_io: string
+```
+
+## Output Format
+```yaml
+optimization_plan:
+  indexes: string[]
+  query_changes: string[]
+  workload_isolation: string[]
+measurement:
+  baselines: string[]
+  success_metrics: string[]
+```
+
+## Execution Logic
+1. Identify whether the bottleneck is query shape, indexing, contention, or hardware saturation.
+2. IF one or two hot queries dominate, fix those first.
+3. IF contention dominates, reduce transaction scope or partition ownership.
+4. IF mixed workloads interfere, isolate analytical and operational traffic.
+5. Return measurable changes with rollback-safe sequencing.
+
+## Rules
+1. Read execution plans before proposing indexes.
+2. Index for real filters, joins, and sort order.
+3. Keep transactions short on hot tables.
+4. Separate reporting from OLTP where feasible.
+5. Benchmark before and after changes.
+
+## Constraints
+- Never add indexes blindly.
+- Never optimize without query-level evidence.
+- Never ignore write amplification from new indexes.
+
+## Examples
+Input: Django API with slow tenant-scoped search and lock waits on invoice updates.
+Output: composite index fixes, transaction narrowing, and read replica or projection guidance.
+
+## Output Style
+Return a database tuning plan with evidence-driven actions.

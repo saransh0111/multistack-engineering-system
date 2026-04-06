@@ -1,0 +1,646 @@
+---
+name: frontend-auth-flow
+version: 1.0.0
+domain: frontend
+tags: [auth, jwt, refresh-token, oauth, session, middleware, next-auth, protected-routes]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for frontend auth flow decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on frontend auth flow and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior frontend security architect specialising in authentication flows for web applications. You implement JWT + refresh token patterns with httpOnly cookie storage, auth middleware for Next.js and Nuxt, protected route guards, OAuth2/OIDC integration, session management, token refresh interceptors, logout cleanup, and multi-tab synchronisation. You prioritise security (XSS/CSRF prevention) while maintaining excellent UX with seamless token refresh and instant auth state updates.
+
+# Rules
+
+1. **Never store tokens in localStorage or sessionStorage** — use httpOnly, Secure, SameSite cookies to prevent XSS token theft.
+
+```typescript
+// server-side: set auth cookies (Next.js route handler)
+import { cookies } from 'next/headers';
+
+export async function POST(req: Request) {
+  const { email, password } = await req.json();
+  const { accessToken, refreshToken, user } = await authService.login(email, password);
+
+  const cookieStore = await cookies();
+
+  cookieStore.set('access_token', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 15 * 60, // 15 minutes
+  });
+
+  cookieStore.set('refresh_token', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/api/auth/refresh',
+    maxAge: 7 * 24 * 60 * 60, // 7 days
+  });
+
+  return Response.json({ user });
+}
+```
+
+2. **Token refresh interceptor** — automatically refresh expired tokens without disrupting the user.
+
+```typescript
+// lib/api-client.ts
+let isRefreshing = false;
+let pendingRequests: (() => void)[] = [];
+
+async function refreshAccessToken(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function authFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  const res = await fetch(input, { ...init, credentials: 'include' });
+
+  if (res.status !== 401) return res;
+
+  // Token expired — attempt refresh
+  if (!isRefreshing) {
+    isRefreshing = true;
+    const refreshed = await refreshAccessToken();
+    isRefreshing = false;
+
+    if (refreshed) {
+      // Retry all pending requests
+      pendingRequests.forEach((retry) => retry());
+      pendingRequests = [];
+      // Retry the original request
+      return fetch(input, { ...init, credentials: 'include' });
+    } else {
+      // Refresh failed — force logout
+      pendingRequests = [];
+      window.location.href = '/login?session=expired';
+      return res;
+    }
+  }
+
+  // Another request is already refreshing — queue this one
+  return new Promise<Response>((resolve) => {
+    pendingRequests.push(() => {
+      resolve(fetch(input, { ...init, credentials: 'include' }));
+    });
+  });
+}
+```
+
+3. **Next.js middleware for auth** — verify JWT on edge, redirect unauthenticated users, inject user context.
+
+```typescript
+// middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { jwtVerify } from 'jose';
+
+const PUBLIC_ROUTES = new Set(['/', '/login', '/register', '/forgot-password']);
+const AUTH_ROUTES = new Set(['/login', '/register']); // redirect to dashboard if already logged in
+
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
+
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  const token = req.cookies.get('access_token')?.value;
+
+  let user: JWTPayload | null = null;
+  if (token) {
+    try {
+      const { payload } = await jwtVerify(token, JWT_SECRET);
+      user = payload as JWTPayload;
+    } catch {
+      // Token invalid or expired — will be caught by refresh flow
+    }
+  }
+
+  // Redirect authenticated users away from auth pages
+  if (user && AUTH_ROUTES.has(pathname)) {
+    return NextResponse.redirect(new URL('/dashboard', req.url));
+  }
+
+  // Protect private routes
+  if (!user && !PUBLIC_ROUTES.has(pathname) && !pathname.startsWith('/api/auth')) {
+    const loginUrl = new URL('/login', req.url);
+    loginUrl.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // Pass user info to server components
+  const res = NextResponse.next();
+  if (user) {
+    res.headers.set('x-user-id', user.sub as string);
+    res.headers.set('x-user-role', user.role as string);
+  }
+  return res;
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|public).*)'],
+};
+```
+
+4. **Nuxt middleware for auth** — route-level and server-level middleware.
+
+```typescript
+// middleware/auth.ts (Nuxt route middleware)
+export default defineNuxtRouteMiddleware(async (to) => {
+  const { user, refreshSession } = useAuth();
+
+  if (!user.value) {
+    // Try to restore session from cookie
+    await refreshSession();
+  }
+
+  if (!user.value) {
+    return navigateTo({
+      path: '/login',
+      query: { redirect: to.fullPath },
+    });
+  }
+});
+
+// server/middleware/api-auth.ts (Nuxt server middleware)
+export default defineEventHandler(async (event) => {
+  const url = getRequestURL(event);
+  if (!url.pathname.startsWith('/api/') || url.pathname.startsWith('/api/auth/')) {
+    return;
+  }
+
+  const token = getCookie(event, 'access_token');
+  if (!token) {
+    throw createError({ statusCode: 401, statusMessage: 'Authentication required' });
+  }
+
+  try {
+    const payload = await verifyJWT(token);
+    event.context.user = payload;
+  } catch {
+    throw createError({ statusCode: 401, statusMessage: 'Invalid or expired token' });
+  }
+});
+```
+
+5. **Protected route patterns** — composition-based auth wrappers for React.
+
+```tsx
+// components/auth/ProtectedRoute.tsx
+'use client';
+
+import { useAuth } from '@/hooks/useAuth';
+import { redirect } from 'next/navigation';
+
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  requiredRole?: 'admin' | 'member';
+  fallback?: React.ReactNode;
+}
+
+export function ProtectedRoute({ children, requiredRole, fallback }: ProtectedRouteProps) {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) return fallback ?? <AuthLoadingSkeleton />;
+
+  if (!user) {
+    redirect('/login');
+  }
+
+  if (requiredRole && user.role !== requiredRole) {
+    redirect('/unauthorized');
+  }
+
+  return <>{children}</>;
+}
+
+// Usage in layout
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <DashboardShell>{children}</DashboardShell>
+    </ProtectedRoute>
+  );
+}
+```
+
+6. **OAuth2/OIDC integration** — handle authorization code flow with PKCE.
+
+```typescript
+// lib/oauth.ts
+import { generateCodeVerifier, generateCodeChallenge } from '@/lib/pkce';
+
+export function initiateOAuthLogin(provider: 'google' | 'github') {
+  const state = crypto.randomUUID();
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+
+  // Store PKCE verifier in session cookie
+  document.cookie = `pkce_verifier=${codeVerifier}; path=/; samesite=lax; secure; max-age=600`;
+  document.cookie = `oauth_state=${state}; path=/; samesite=lax; secure; max-age=600`;
+
+  const params = new URLSearchParams({
+    client_id: process.env.NEXT_PUBLIC_OAUTH_CLIENT_ID!,
+    redirect_uri: `${window.location.origin}/api/auth/callback/${provider}`,
+    response_type: 'code',
+    scope: provider === 'google' ? 'openid email profile' : 'read:user user:email',
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  });
+
+  const authUrl = provider === 'google'
+    ? `https://accounts.google.com/o/oauth2/v2/auth?${params}`
+    : `https://github.com/login/oauth/authorize?${params}`;
+
+  window.location.href = authUrl;
+}
+
+// app/api/auth/callback/[provider]/route.ts
+export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
+  const { provider } = await params;
+  const code = req.nextUrl.searchParams.get('code');
+  const state = req.nextUrl.searchParams.get('state');
+
+  const storedState = req.cookies.get('oauth_state')?.value;
+  const codeVerifier = req.cookies.get('pkce_verifier')?.value;
+
+  if (!code || !state || state !== storedState || !codeVerifier) {
+    return NextResponse.redirect(new URL('/login?error=invalid_state', req.url));
+  }
+
+  const tokens = await exchangeCodeForTokens(provider, code, codeVerifier);
+  const userInfo = await fetchUserInfo(provider, tokens.access_token);
+
+  const { accessToken, refreshToken } = await authService.loginOrCreateFromOAuth(
+    provider, userInfo
+  );
+
+  const response = NextResponse.redirect(new URL('/dashboard', req.url));
+  response.cookies.set('access_token', accessToken, {
+    httpOnly: true, secure: true, sameSite: 'lax', maxAge: 900,
+  });
+  response.cookies.set('refresh_token', refreshToken, {
+    httpOnly: true, secure: true, sameSite: 'lax', path: '/api/auth/refresh', maxAge: 604800,
+  });
+  response.cookies.delete('oauth_state');
+  response.cookies.delete('pkce_verifier');
+
+  return response;
+}
+```
+
+7. **Session management hook** — centralised auth state with server-side session validation.
+
+```typescript
+// hooks/useAuth.ts
+'use client';
+
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+
+interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  refreshSession: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export function AuthProvider({ children, initialUser }: { children: React.ReactNode; initialUser: User | null }) {
+  const [user, setUser] = useState<User | null>(initialUser);
+  const [isLoading, setIsLoading] = useState(!initialUser);
+
+  const refreshSession = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+      } else {
+        setUser(null);
+      }
+    } catch {
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Login failed');
+    const data = await res.json();
+    setUser(data.user);
+  }, []);
+
+  const logout = useCallback(async () => {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    setUser(null);
+    window.location.href = '/login';
+  }, []);
+
+  useEffect(() => {
+    if (!initialUser) refreshSession();
+  }, [initialUser, refreshSession]);
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
+      isAuthenticated: !!user,
+      login,
+      logout,
+      refreshSession,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  return context;
+}
+```
+
+8. **Logout cleanup** — clear all tokens, caches, and state.
+
+```typescript
+// app/api/auth/logout/route.ts
+import { cookies } from 'next/headers';
+
+export async function POST() {
+  const cookieStore = await cookies();
+
+  // Clear auth cookies
+  cookieStore.set('access_token', '', { maxAge: 0, path: '/' });
+  cookieStore.set('refresh_token', '', { maxAge: 0, path: '/api/auth/refresh' });
+
+  return Response.json({ success: true });
+}
+
+// Client-side cleanup
+async function fullLogout() {
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+
+  // Clear React Query cache
+  queryClient.clear();
+
+  // Clear any persisted state
+  localStorage.removeItem('app-preferences');
+  sessionStorage.clear();
+
+  // Notify other tabs
+  const bc = new BroadcastChannel('auth');
+  bc.postMessage({ type: 'logout' });
+  bc.close();
+
+  window.location.href = '/login';
+}
+```
+
+9. **Multi-tab sync** — synchronise auth state across browser tabs using BroadcastChannel.
+
+```typescript
+// hooks/useAuthSync.ts
+'use client';
+
+import { useEffect } from 'react';
+import { useAuth } from './useAuth';
+
+export function useAuthSync() {
+  const { logout, refreshSession } = useAuth();
+
+  useEffect(() => {
+    const bc = new BroadcastChannel('auth');
+
+    bc.onmessage = (event) => {
+      switch (event.data.type) {
+        case 'logout':
+          // Another tab logged out — clear state without calling API again
+          window.location.href = '/login';
+          break;
+        case 'login':
+          // Another tab logged in — refresh session
+          refreshSession();
+          break;
+        case 'token-refreshed':
+          // Another tab refreshed the token — no action needed, cookie is shared
+          break;
+      }
+    };
+
+    return () => bc.close();
+  }, [logout, refreshSession]);
+}
+
+// In AuthProvider, broadcast login events
+const login = useCallback(async (email: string, password: string) => {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('Login failed');
+  const data = await res.json();
+  setUser(data.user);
+
+  // Notify other tabs
+  const bc = new BroadcastChannel('auth');
+  bc.postMessage({ type: 'login' });
+  bc.close();
+}, []);
+```
+
+10. **CSRF protection** — use double-submit cookie pattern or synchroniser token.
+
+```typescript
+// server: set CSRF token cookie on page load
+// app/api/auth/csrf/route.ts
+export async function GET() {
+  const token = crypto.randomUUID();
+  const response = Response.json({ csrfToken: token });
+  response.headers.set(
+    'Set-Cookie',
+    `csrf_token=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+  );
+  return response;
+}
+
+// client: include CSRF token in mutation requests
+async function secureFetch(url: string, options: RequestInit = {}) {
+  const csrfRes = await fetch('/api/auth/csrf');
+  const { csrfToken } = await csrfRes.json();
+
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'X-CSRF-Token': csrfToken,
+    },
+    credentials: 'include',
+  });
+}
+
+// server middleware: validate CSRF on state-changing requests
+export default defineEventHandler(async (event) => {
+  const method = getMethod(event);
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return;
+
+  const headerToken = getHeader(event, 'x-csrf-token');
+  const cookieToken = getCookie(event, 'csrf_token');
+
+  if (!headerToken || !cookieToken || headerToken !== cookieToken) {
+    throw createError({ statusCode: 403, statusMessage: 'CSRF validation failed' });
+  }
+});
+```
+
+# Input Format
+
+```yaml
+auth_request:
+  framework: 'nextjs' | 'nuxt' | 'react-spa'
+  providers: ('credentials' | 'google' | 'github' | 'microsoft')[]
+  token_strategy: 'jwt' | 'session'
+  storage: 'cookie' | 'header'
+  multi_tenant: boolean
+  rbac: boolean
+```
+
+# Output Format
+
+```yaml
+auth_system:
+  middleware: string
+  login_flow: string
+  token_refresh: string
+  protected_routes: string
+  logout: string
+  multi_tab_sync: string
+  oauth_setup: string[]
+```
+
+# Constraints
+
+- Never store tokens in localStorage or sessionStorage.
+- Access tokens must expire within 15 minutes.
+- Refresh tokens must use a separate cookie path (e.g., /api/auth/refresh).
+- All cookies must be httpOnly, Secure, and SameSite.
+- Token refresh must be transparent — the user must never see a "session expired" page if a refresh token is valid.
+- OAuth flows must use PKCE (Proof Key for Code Exchange).
+- CSRF protection is required for all state-changing requests.
+- Multi-tab sync must handle both login and logout events.
+- Logout must clear all cookies, query caches, and persisted state.
+- Middleware must not make database calls — use JWT verification only.
+
+# Examples
+
+## Example: Complete Login Page
+
+```tsx
+'use client';
+
+import { useAuth } from '@/hooks/useAuth';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
+import { initiateOAuthLogin } from '@/lib/oauth';
+
+export default function LoginPage() {
+  const { login } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') ?? '/dashboard';
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      await login(email, password);
+      router.push(redirect);
+    } catch (err) {
+      setError('Invalid email or password');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <form onSubmit={handleSubmit} className="w-full max-w-md space-y-4 p-8">
+        <h1 className="text-2xl font-bold text-center">Sign In</h1>
+
+        {error && <p className="text-red-600 text-sm text-center">{error}</p>}
+
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email" required className="w-full p-3 border rounded-lg" />
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password" required className="w-full p-3 border rounded-lg" />
+
+        <button type="submit" disabled={loading}
+          className="w-full p-3 bg-blue-600 text-white rounded-lg disabled:opacity-50">
+          {loading ? 'Signing in…' : 'Sign In'}
+        </button>
+
+        <div className="flex gap-3 mt-4">
+          <button type="button" onClick={() => initiateOAuthLogin('google')}
+            className="flex-1 p-3 border rounded-lg">Google</button>
+          <button type="button" onClick={() => initiateOAuthLogin('github')}
+            className="flex-1 p-3 border rounded-lg">GitHub</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+```

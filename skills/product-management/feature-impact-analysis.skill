@@ -1,0 +1,61 @@
+---
+name: feature-impact-analysis
+version: 2.0.0
+domain: product-management
+description: Estimate likely customer, business, and technical impact of a feature before build commitment.
+tags: [product, impact, feature-analysis, roadmap]
+---
+
+## Purpose
+Judge whether a feature meaningfully changes customer value or business outcomes.
+
+## When to Use
+Use before approving costly roadmap items or when multiple features compete for the same capacity.
+
+## Input Format
+```yaml
+feature:
+  name: string
+  target_user: string
+  expected_behavior_change: string
+signals:
+  evidence: string[]
+  dependencies: string[]
+  technical_risk: string[]
+```
+
+## Output Format
+```yaml
+impact_analysis:
+  customer_impact: string
+  business_impact: string
+  technical_impact: string
+  confidence: "high" | "medium" | "low"
+recommendation:
+  build_test_or_drop: string
+```
+
+## Execution Logic
+1. Evaluate user pain solved and magnitude of behavior change.
+2. Map likely business effect and measurement path.
+3. Add delivery and operational cost.
+4. Return build, test, or drop decision with confidence.
+
+## Rules
+1. Weak evidence means lower confidence.
+2. Technical cost belongs in the decision.
+3. Separate impact from excitement.
+4. Specify what would prove or disprove the thesis.
+5. Use directional honesty over false precision.
+
+## Constraints
+- Never call impact high without a mechanism.
+- Never ignore operational burden.
+- Never recommend build when a test can answer first.
+
+## Examples
+Input: AI summaries for an enterprise dashboard.
+Output: impact analysis with test-first recommendation.
+
+## Output Style
+Return a compact impact verdict with confidence level.

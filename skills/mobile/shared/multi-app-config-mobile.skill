@@ -1,0 +1,515 @@
+---
+name: Multi-App Configuration for Mobile
+version: 2.0.0
+domain: mobile/shared
+tags: [build-flavors, product-flavors, xcconfig, cocoapods, firebase, hilt, koin, multi-project]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for multi app config mobile decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on multi app config mobile and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior mobile engineer managing multiple app variants across iOS and Android.
+On Android you configure productFlavors with a "brand" dimension (build.gradle.kts), custom
+APK/AAB naming, and per-flavor resources (colors, strings, domains). On iOS you manage multiple
+Xcode targets sharing the same source via CocoaPods shared_pods, per-brand plist files loaded
+by BrandPropertiesController, and per-bundle Firebase config. You handle environment-specific
+BASE_URL via BuildConfig (Android) and configuration plists (iOS). Large orgs often run several
+Android and iOS apps with no shared mobile SDK — conventions repeat at the dependency level.
+
+# Team Patterns
+
+## Typical setups
+
+- **Multi-brand Android**: one repo, `productFlavors` (e.g. `brand` dimension), per-flavor `google-services.json`, Hilt or Koin.
+- **Multi-target iOS**: one Xcode project, multiple targets, CocoaPods `shared_pods`, per-target Firebase plist and branding plist.
+- **Single-app repos**: one `applicationId` / one bundle ID, optional `staging` build type, same networking and DI patterns.
+
+# Rules
+
+## 1. Android: productFlavors with brand dimension
+
+```kotlin
+// app/build.gradle.kts — excerpt
+android {
+    flavorDimensions += "brand"
+
+    productFlavors {
+        create("brandMain") {
+            dimension = "brand"
+            applicationId = "com.example.branda"
+            resValue("color", "colorPrimary", "#2962FF")
+            resValue("color", "colorPrimaryDark", "#0039CB")
+            resValue("color", "colorAccent", "#448AFF")
+            resValue("string", "app_name", "Example App")
+            resValue("string", "domain", "example.com")
+            buildConfigField("String", "ARN_LIST", "\"deeplinkId:aws:sns:ap-south-1:...:brandMain\"")
+        }
+        create("brandAlt") {
+            dimension = "brand"
+            applicationId = "com.example.brandd"
+            resValue("color", "colorPrimary", "#FF6D00")
+            resValue("color", "colorPrimaryDark", "#C43E00")
+            resValue("color", "colorAccent", "#FFAB40")
+            resValue("string", "app_name", "Brand Alt")
+            resValue("string", "domain", "brandalt.example.com")
+            buildConfigField("String", "ARN_LIST", "\"deeplinkId:aws:sns:REGION:ACCOUNT:brandAlt\"")
+        }
+        create("brandPartner") {
+            dimension = "brand"
+            applicationId = "com.example.brandc"
+            resValue("color", "colorPrimary", "#1B5E20")
+            resValue("color", "colorPrimaryDark", "#003300")
+            resValue("color", "colorAccent", "#66BB6A")
+            resValue("string", "app_name", "Brand Partner")
+            resValue("string", "domain", "brandpartner.example.com")
+            buildConfigField("String", "ARN_LIST", "\"deeplinkId:aws:sns:REGION:ACCOUNT:brandPartner\"")
+        }
+        // additional flavors follow the same pattern...
+    }
+}
+```
+
+## 2. Android: BASE_URL via build types (debug/release)
+
+```kotlin
+// app/build.gradle.kts
+android {
+    buildTypes {
+        debug {
+            buildConfigField("String", "BASE_URL", "\"https://staging-api.example.com/\"")
+        }
+        release {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("String", "BASE_URL", "\"https://api.example.com/\"")
+        }
+    }
+}
+
+// Usage in code — BuildConfig.BASE_URL resolves per build type
+// Retrofit setup:
+// Retrofit.Builder().baseUrl(BuildConfig.BASE_URL).build()
+```
+
+Some apps add a `staging` build type:
+
+```kotlin
+buildTypes {
+    debug { ... }
+    create("staging") {
+        initWith(getByName("debug"))
+        buildConfigField("String", "BASE_URL", "\"https://staging-api.example.com/\"")
+    }
+    release { ... }
+}
+```
+
+## 3. Android: Custom APK/AAB naming and batch builds
+
+```kotlin
+// app/build.gradle.kts — custom output names
+android {
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val flavor = variant.productFlavors[0].name
+            val buildType = variant.buildType.name
+            val versionName = variant.versionName
+            output.outputFileName = "${flavor}-${buildType}-v${versionName}.apk"
+        }
+    }
+}
+
+// Batch build task for all release variants
+// Usage: ./gradlew bundleAllRelease
+tasks.register("bundleAllRelease") {
+    dependsOn(
+        "bundleBrandMainRelease",
+        "bundleBrandAltRelease",
+        "bundleBrandPartnerRelease"
+        // ... all flavor release tasks
+    )
+}
+```
+
+## 4. Android: Per-flavor Firebase and resources
+
+```
+app/
+├── src/
+│   ├── main/                 (shared source)
+│   ├── brandMain/
+│   │   ├── res/
+│   │   │   ├── values/
+│   │   │   │   └── colors.xml    (overridden via resValue in build.gradle.kts)
+│   │   │   ├── drawable/         (brand-specific icons, splash)
+│   │   │   └── mipmap-*/         (launcher icons)
+│   │   └── google-services.json  (Firebase for brandMain)
+│   ├── brandAlt/
+│   │   ├── res/
+│   │   │   └── drawable/
+│   │   └── google-services.json  (Firebase for brandAlt)
+│   └── brandPartner/
+│       ├── res/
+│       └── google-services.json  (Firebase for brandPartner)
+```
+
+Each flavor has its own `google-services.json` placed under `src/{flavorName}/`.
+The Google Services Gradle plugin automatically selects the correct file based on the active flavor.
+
+## 5. iOS: CocoaPods multi-target with shared_pods
+
+```ruby
+# Podfile — excerpt
+platform :ios, '14.0'
+
+def shared_pods
+  pod 'Alamofire', '~> 5.9'
+  pod 'Kingfisher', '~> 7.0'
+  pod 'Firebase/Analytics'
+  pod 'Firebase/Crashlytics'
+  pod 'Firebase/Messaging'
+  pod 'SnapKit', '~> 5.7'
+  pod 'IQKeyboardManagerSwift'
+  # ... all shared dependencies
+end
+
+target 'MainApp' do
+  use_frameworks!
+  shared_pods
+end
+
+target 'BrandB' do
+  use_frameworks!
+  shared_pods
+end
+
+# additional brand targets follow same pattern...
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+    end
+  end
+end
+```
+
+Each target compiles the same Swift source files but uses its own:
+- Bundle identifier
+- Info.plist (Config/Info-{Brand}.plist)
+- Brand-specific plist (Branding/{bundleID}.plist)
+- Firebase plist (GoogleService-Info-{Brand}.plist)
+
+## 6. iOS: BrandPropertiesController — plist-based brand config
+
+```swift
+// BrandPropertiesController.swift — excerpt
+class BrandPropertiesController {
+    static let shared = BrandPropertiesController()
+
+    private var properties: [String: Any] = [:]
+
+    private init() {
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        if let path = Bundle.main.path(forResource: bundleID, ofType: "plist"),
+           let dict = NSDictionary(contentsOfFile: path) as? [String: Any] {
+            properties = dict
+        }
+    }
+
+    var appName: String {
+        properties["AppName"] as? String ?? ""
+    }
+
+    var baseURL: String {
+        properties["BaseURL"] as? String ?? ""
+    }
+
+    var primaryColor: String {
+        properties["PrimaryColor"] as? String ?? "#000000"
+    }
+
+    var supportEmail: String {
+        properties["SupportEmail"] as? String ?? ""
+    }
+
+    var termsURL: String {
+        properties["TermsURL"] as? String ?? ""
+    }
+}
+```
+
+Brand plists live under `Branding/` with the bundle identifier as filename:
+
+```
+Branding/
+├── com.example.main.plist          → main brand properties
+├── com.example.brandc.plist     → partner brand properties
+└── ...
+```
+
+Each plist contains keys: AppName, BaseURL, PrimaryColor, SecondaryColor, SupportEmail,
+TermsURL, PrivacyURL, Domain, ARNList, etc.
+
+## 7. iOS: Firebase plist selection per bundle ID
+
+```swift
+// Firebase-Config.swift — excerpt
+import FirebaseCore
+
+func configureFirebase() {
+    let bundleID = Bundle.main.bundleIdentifier ?? ""
+    let plistName: String
+
+    switch bundleID {
+    case "com.example.main":
+        plistName = "GoogleService-Info-Main"
+    case "com.example.brandc":
+        plistName = "GoogleService-Info-BrandB"
+    default:
+        plistName = "GoogleService-Info"
+    }
+
+    guard let path = Bundle.main.path(forResource: plistName, ofType: "plist"),
+          let options = FirebaseOptions(contentsOfFile: path) else {
+        fatalError("Firebase config not found: \(plistName).plist")
+    }
+    FirebaseApp.configure(options: options)
+}
+```
+
+Firebase plists live under `Firebase-Config/`:
+
+```
+Firebase-Config/
+├── GoogleService-Info-Main.plist
+├── GoogleService-Info-BrandB.plist
+└── ...
+
+Config/
+├── Info-Main.plist
+├── Info-BrandB.plist
+└── ...
+```
+
+## 8. iOS: ThemePropertiesController for runtime theming
+
+```swift
+// ThemePropertiesController.swift — excerpt
+class ThemePropertiesController {
+    static let shared = ThemePropertiesController()
+
+    private let brand = BrandPropertiesController.shared
+
+    var primaryColor: UIColor {
+        UIColor(hex: brand.primaryColor)
+    }
+
+    var navigationBarColor: UIColor {
+        UIColor(hex: brand.properties["NavigationBarColor"] as? String ?? brand.primaryColor)
+    }
+
+    var fontName: String {
+        brand.properties["FontName"] as? String ?? "System"
+    }
+
+    func applyGlobalAppearance() {
+        UINavigationBar.appearance().barTintColor = navigationBarColor
+        UINavigationBar.appearance().tintColor = .white
+        UINavigationBar.appearance().isTranslucent = false
+        UITabBar.appearance().tintColor = primaryColor
+    }
+}
+```
+
+Called at app launch to configure global UIKit appearance proxies.
+
+## 9. Android: Non-multi-brand project patterns
+
+Projects that are NOT multi-branded still follow a consistent structure:
+
+```kotlin
+// build.gradle.kts — typical single-app project
+android {
+    defaultConfig {
+        applicationId = "com.example.simpleapp"
+        // ...
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField("String", "BASE_URL", "\"https://staging-api.example.com/\"")
+        }
+        release {
+            buildConfigField("String", "BASE_URL", "\"https://api.example.com/\"")
+        }
+    }
+}
+```
+
+Key differences from a multi-brand productFlavors setup:
+- No `flavorDimensions` or `productFlavors`
+- Single `applicationId` in `defaultConfig`
+- BASE_URL still managed via `buildTypes`
+- Firebase via single `google-services.json` in `app/` root
+
+## 10. Flutter: Generic flavor patterns (no Flutter in current codebase)
+
+The team does not currently use Flutter. These patterns are provided for consistency
+if a Flutter project is added:
+
+```dart
+// lib/config/environment.dart
+class EnvConfig {
+  final String apiBaseUrl;
+  final String brandId;
+  final bool isProduction;
+
+  const EnvConfig._({
+    required this.apiBaseUrl,
+    required this.brandId,
+    required this.isProduction,
+  });
+
+  static EnvConfig fromEnvironment() {
+    const flavor = String.fromEnvironment('FLAVOR', defaultValue: 'dev');
+    switch (flavor) {
+      case 'prod':
+        return const EnvConfig._(
+          apiBaseUrl: 'https://api.example.com',
+          brandId: 'default',
+          isProduction: true,
+        );
+      default:
+        return const EnvConfig._(
+          apiBaseUrl: 'https://staging-api.example.com',
+          brandId: 'default',
+          isProduction: false,
+        );
+    }
+  }
+}
+```
+
+```bash
+flutter run --flavor dev -t lib/main_dev.dart --dart-define=FLAVOR=dev
+flutter build appbundle --flavor prod -t lib/main_prod.dart --dart-define=FLAVOR=prod
+```
+
+Follow the Android/iOS patterns above: brand dimension for flavors, per-brand
+google-services.json / GoogleService-Info.plist, and plist-based brand properties.
+
+## 11. Environment management summary
+
+```
+┌─────────────┬──────────────────────────────────────────────────────┐
+│ Platform    │ How BASE_URL is resolved                            │
+├─────────────┼──────────────────────────────────────────────────────┤
+│ Android     │ BuildConfig.BASE_URL set in buildTypes { }          │
+│             │ debug → staging URL, release → production URL       │
+│             │ optional `staging` buildType                      │
+├─────────────┼──────────────────────────────────────────────────────┤
+│ iOS         │ Per-brand plist loaded by BrandPropertiesController  │
+│             │ Each brand plist has its own BaseURL key             │
+│             │ Debug/Release can also differ via xcconfig or        │
+│             │ preprocessor macros                                  │
+├─────────────┼──────────────────────────────────────────────────────┤
+│ Flutter     │ --dart-define=FLAVOR= at build time                  │
+│             │ (generic — no Flutter in current codebase)           │
+└─────────────┴──────────────────────────────────────────────────────┘
+```
+
+## 12. Firebase across the ecosystem
+
+```
+┌─────────────────────────┬─────────────────────────────────────────┐
+│ Project                 │ Firebase setup                          │
+├─────────────────────────┼─────────────────────────────────────────┤
+│ Multi-brand Android     │ Per-flavor google-services.json         │
+│                         │ src/{flavorName}/google-services.json   │
+├─────────────────────────┼─────────────────────────────────────────┤
+│ Other Android projects  │ Single google-services.json in app/     │
+├─────────────────────────┼─────────────────────────────────────────┤
+│ Multi-target iOS                   │ Per-target GoogleService-Info-*.plist   │
+│                         │ Selected by bundle ID in                │
+│                         │ Firebase-Config.swift                   │
+├─────────────────────────┼─────────────────────────────────────────┤
+│ Single-target iOS       │ Single GoogleService-Info.plist         │
+└─────────────────────────┴─────────────────────────────────────────┘
+```
+
+# Input Format
+
+```
+App Name: [project name from the ecosystem]
+Build Variant: [flavor name or target name]
+Platform: [iOS / Android]
+Environment: [debug / staging / release]
+DI Framework: [Hilt / Koin — determined by project]
+```
+
+# Output Format
+
+```
+// MARK: - Android
+// build.gradle.kts — productFlavors (brand dimension) or defaultConfig
+// buildTypes — debug/release BASE_URL
+// src/{flavor}/ resources and google-services.json
+
+// MARK: - iOS
+// Podfile — shared_pods across targets
+// BrandPropertiesController — plist per bundle ID
+// Firebase-Config.swift — plist selection per target
+// ThemePropertiesController — colors/fonts from brand plist
+
+// MARK: - Flutter (generic)
+// lib/config/environment.dart
+// lib/main_{flavor}.dart entry points
+```
+
+# Constraints
+
+- NEVER hardcode BASE_URL in source; always derive from BuildConfig (Android) or brand plist (iOS).
+- Android multi-brand MUST use `productFlavors` with dimension `"brand"`, not `"environment"`.
+- iOS multi-brand MUST use separate Xcode targets sharing source via CocoaPods `shared_pods`.
+- Each brand MUST have its own applicationId (Android) or bundle identifier (iOS).
+- Firebase MUST use per-flavor `google-services.json` (Android) or per-target plist selected in `Firebase-Config.swift` (iOS).
+- Brand properties on iOS MUST be loaded from `Bundle.main.path(forResource: bundleID, ofType: "plist")` via `BrandPropertiesController.shared`.
+- Non-multi-brand projects use `defaultConfig` applicationId and `buildTypes` for environment only.
+- DI framework choice follows the project: Hilt and Koin are both common; match the existing codebase.
+- `bundleAllRelease` task MUST aggregate all flavor release bundle tasks for batch builds.
+- Custom APK/AAB naming MUST include flavor, build type, and version: `{flavor}-{buildType}-v{version}.apk`.
+- Flutter patterns are kept generic since no Flutter project exists in the current codebase.
+- Secrets, signing configs, and API keys MUST come from CI/CD secrets or local properties, never committed to repo.

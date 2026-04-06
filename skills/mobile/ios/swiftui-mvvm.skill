@@ -1,0 +1,665 @@
+---
+name: SwiftUI MVVM Architecture
+version: 3.0.0
+domain: mobile/ios
+tags: [swiftui, mvvm, observable, observation, async-await, state-management, modern-swift, production-patterns]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for swiftui mvvm decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on swiftui mvvm and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior iOS architect building SwiftUI apps with the modern Observation framework (@Observable
+macro, iOS 17+). ViewModels are @Observable classes — no @Published boilerplate, no @StateObject vs
+@ObservedObject confusion. Views use @State for VM ownership and @Environment for shared dependencies
+like Router. Networking is async/await by default. Combine is reserved for genuinely reactive streams
+(WebSocket, search debounce). You understand the team's existing ObservableObject codebase and can
+guide migration, but all NEW code uses @Observable.
+
+# Rules
+
+## 1. @Observable ViewModel — the modern standard
+
+No `ObservableObject`, no `@Published`. The `@Observable` macro handles fine-grained tracking
+automatically — only views that READ a specific property re-render when it changes.
+
+```swift
+import Observation
+import SwiftUI
+
+@Observable
+class HomeViewModel {
+    var dashboardData: DashboardModel?
+    var isLoading = false
+    var errorMessage: String?
+    var showError = false
+
+    private let networkService: NetworkService
+
+    init(networkService: NetworkService = NetworkService()) {
+        self.networkService = networkService
+    }
+
+    func fetchDashboard() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let response = try await networkService.request(
+                endpoint: .dashboard,
+                params: ["user_id": AppState.shared.user?.id ?? ""]
+            )
+            dashboardData = response.decoder(with: DashboardModel.self)
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+    }
+}
+```
+
+## 2. View wires ViewModel with @State and uses @Environment for Router
+
+`@State` replaces `@StateObject` for @Observable types. `@Environment` replaces
+`@EnvironmentObject`. No more ownership semantics confusion.
+
+```swift
+struct HomeView: View {
+    @State private var viewModel = HomeViewModel()
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        ScrollView {
+            if viewModel.isLoading {
+                ProgressView()
+            } else if let dashboard = viewModel.dashboardData {
+                DashboardCardView(data: dashboard)
+                    .onTapGesture {
+                        router.navigate(to: .portfolioDetail(id: dashboard.portfolioId))
+                    }
+            }
+        }
+        .task {
+            await viewModel.fetchDashboard()
+        }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.errorMessage ?? "Something went wrong")
+        }
+    }
+}
+```
+
+## 3. @Observable vs ObservableObject cheat sheet
+
+```
+┌──────────────────────────┬──────────────────────────────────┐
+│   ObservableObject (old) │   @Observable (modern, iOS 17+)  │
+├──────────────────────────┼──────────────────────────────────┤
+│ class VM: ObservableObj  │ @Observable class VM             │
+│ @Published var name = "" │ var name = ""                    │
+│ @StateObject var vm      │ @State var vm                    │
+│ @ObservedObject var vm   │ var vm  (just a property)        │
+│ @EnvironmentObject       │ @Environment(Type.self)          │
+│ .environmentObject(obj)  │ .environment(obj)                │
+│ $vm.name (Binding)       │ @Bindable var vm → $vm.name      │
+│ objectWillChange.send()  │ automatic (fine-grained)         │
+│ whole-object invalidation│ per-property invalidation        │
+└──────────────────────────┴──────────────────────────────────┘
+```
+
+## 4. AppState replaces Defaults.shared — using @Observable
+
+The singleton manager pattern still works but should use @Observable for
+reactive updates across the app.
+
+```swift
+@Observable
+class AppState {
+    static let shared = AppState()
+    private init() {}
+
+    var user: UserModel?
+    var userStatus: UserStatusModel?
+    var isLoggedIn: Bool { user != nil }
+    var accessToken: String?
+    var fcmToken: String?
+
+    func clearOnLogout() {
+        user = nil
+        userStatus = nil
+        accessToken = nil
+        TokenManager.shared.clearTokens()
+    }
+}
+```
+
+## 5. @Observable managers replace ObservableObject singletons
+
+```swift
+@Observable
+class LoaderManager {
+    static let shared = LoaderManager()
+    private init() {}
+
+    var isLoading = false
+
+    func show() { isLoading = true }
+    func hide() { isLoading = false }
+}
+
+@Observable
+class BrandPropertiesController {
+    static let shared = BrandPropertiesController()
+    private init() {}
+
+    var properties: BrandProperties?
+
+    func loadProperties() {
+        let bundleId = Bundle.main.bundleIdentifier ?? ""
+        if let path = Bundle.main.path(forResource: bundleId, ofType: "plist"),
+           let dict = NSDictionary(contentsOfFile: path) as? [String: Any] {
+            properties = BrandProperties(from: dict)
+        }
+    }
+}
+
+class TokenManager {
+    static let shared = TokenManager()
+    private init() {}
+
+    func saveTokens(access: String, refresh: String) {
+        AppState.shared.accessToken = access
+        KeychainHelper.save(key: "refresh_token", value: refresh)
+    }
+
+    func clearTokens() {
+        AppState.shared.accessToken = nil
+        KeychainHelper.delete(key: "refresh_token")
+    }
+}
+```
+
+## 6. @Bindable for two-way bindings with @Observable
+
+When a child view needs a Binding to an @Observable property, use @Bindable.
+
+```swift
+struct EditProfileView: View {
+    @Bindable var viewModel: ProfileEditViewModel
+
+    var body: some View {
+        Form {
+            TextField("Name", text: $viewModel.name)
+            TextField("Email", text: $viewModel.email)
+            TextField("Phone", text: $viewModel.phone)
+
+            Button("Save") {
+                Task { await viewModel.save() }
+            }
+            .disabled(viewModel.isSaving)
+        }
+    }
+}
+
+struct ProfileView: View {
+    @State private var editViewModel = ProfileEditViewModel()
+    @State private var isEditing = false
+
+    var body: some View {
+        VStack {
+            Button("Edit") { isEditing = true }
+        }
+        .sheet(isPresented: $isEditing) {
+            EditProfileView(viewModel: editViewModel)
+        }
+    }
+}
+```
+
+## 7. async/await replaces callback-based networking
+
+All new code uses structured concurrency. `.task` modifier handles lifecycle
+automatically (cancels on disappear).
+
+```swift
+@Observable
+class PortfolioViewModel {
+    var records: [HoldingModel] = []
+    var totalValue: Double = 0
+    var isLoading = false
+    var error: Error?
+
+    private let networkService = NetworkService()
+
+    func fetchPortfolio() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            guard let userId = AppState.shared.user?.id else { return }
+            let response = try await networkService.request(
+                endpoint: .accountSummary,
+                params: ["user_id": userId]
+            )
+            if let accountSummary = response.decoder(with: PortfolioModel.self) {
+                records = accountSummary.records
+                totalValue = accountSummary.totalValue
+            }
+        } catch {
+            self.error = error
+        }
+    }
+}
+```
+
+## 8. Combine is reserved for genuinely reactive streams
+
+Combine is still useful for search debounce and real-time streams. But for simple
+async operations, use async/await instead.
+
+```swift
+import Combine
+
+@Observable
+class CatalogSearchViewModel {
+    var searchText = ""
+    var searchResults: [ProductModel] = []
+    var isSearching = false
+
+    private var searchTask: Task<Void, Never>?
+
+    func onSearchTextChanged(_ text: String) {
+        searchTask?.cancel()
+        guard text.count >= 2 else {
+            searchResults = []
+            return
+        }
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await searchItems(query: text)
+        }
+    }
+
+    private func searchItems(query: String) async {
+        isSearching = true
+        defer { isSearching = false }
+        do {
+            let response = try await NetworkService().request(
+                endpoint: .searchCatalog,
+                params: ["query": query]
+            )
+            if let items = response.decoder(with: [ProductModel].self) {
+                searchResults = items
+            }
+        } catch {
+            // silently fail search — don't show error for search failures
+        }
+    }
+}
+
+// View uses .onChange instead of Combine pipeline
+struct FundSearchView: View {
+    @State private var viewModel = CatalogSearchViewModel()
+
+    var body: some View {
+        List(viewModel.searchResults) { item in
+            Text(item.name)
+        }
+        .searchable(text: $viewModel.searchText)
+        .onChange(of: viewModel.searchText) { _, newValue in
+            viewModel.onSearchTextChanged(newValue)
+        }
+    }
+}
+```
+
+## 9. Feature folder structure (unchanged — still the right pattern)
+
+```
+App/
+├── App/
+│   └── MainApp.swift
+├── Features/
+│   ├── Home/
+│   │   ├── View/
+│   │   │   ├── HomeView.swift
+│   │   │   └── DashboardCardView.swift
+│   │   └── ViewModel/
+│   │       └── HomeViewModel.swift
+│   ├── Login/
+│   ├── Compliance/
+│   ├── RecurringPlan/
+│   ├── AccountSummary/
+│   └── Catalog/
+├── Common/
+│   ├── Router/
+│   │   └── Router.swift
+│   ├── Models/
+│   ├── Views/
+│   └── Managers/
+├── NetworkManager/
+├── Branding/
+├── Services/
+├── Firebase/
+└── Utility/
+```
+
+## 10. App struct with @Environment injection
+
+```swift
+@main
+struct MainApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var router = Router()
+    @State private var loaderManager = LoaderManager.shared
+    @State private var appState = AppState.shared
+
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if appState.isLoggedIn {
+                    MainTabView()
+                } else {
+                    LoginView()
+                }
+            }
+            .environment(router)
+            .environment(loaderManager)
+            .environment(appState)
+            .overlay {
+                if loaderManager.isLoading {
+                    LoaderOverlayView()
+                }
+            }
+        }
+    }
+}
+```
+
+## 11. Passing data to child views — just pass the @Observable object
+
+No more @ObservedObject vs @StateObject confusion. Just pass the object.
+The child view automatically observes any properties it reads.
+
+```swift
+// Parent creates and owns the VM
+struct KYCView: View {
+    @State private var viewModel = KYCViewModel()
+
+    var body: some View {
+        VStack {
+            KYCStepView(viewModel: viewModel)
+            Button("Next") { viewModel.nextStep() }
+        }
+    }
+}
+
+// Child receives the VM — no wrapper needed for read-only access
+struct KYCStepView: View {
+    var viewModel: KYCViewModel
+
+    var body: some View {
+        Text("Step \(viewModel.currentStep) of \(viewModel.totalSteps)")
+    }
+}
+
+// Child needs Binding for two-way access → use @Bindable
+struct KYCFormView: View {
+    @Bindable var viewModel: KYCViewModel
+
+    var body: some View {
+        TextField("PAN Number", text: $viewModel.panNumber)
+    }
+}
+```
+
+## 12. Cross-cutting events — prefer async notification over NotificationCenter
+
+For new code, prefer a typed event channel over stringly-typed NotificationCenter.
+
+```swift
+@Observable
+class EventBus {
+    static let shared = EventBus()
+    private init() {}
+
+    var pendingNavigation: Router.Destination?
+    var shouldRefreshPortfolio = false
+
+    func requestNavigation(to destination: Router.Destination) {
+        pendingNavigation = destination
+    }
+
+    func triggerPortfolioRefresh() {
+        shouldRefreshPortfolio = true
+    }
+
+    func consumeNavigation() -> Router.Destination? {
+        defer { pendingNavigation = nil }
+        return pendingNavigation
+    }
+}
+
+// Usage in MainTabView
+struct MainTabView: View {
+    @Environment(Router.self) private var router
+    @State private var eventBus = EventBus.shared
+
+    var body: some View {
+        TabView { /* tabs */ }
+        .onChange(of: eventBus.pendingNavigation) { _, destination in
+            if let destination {
+                router.navigate(to: destination)
+                _ = eventBus.consumeNavigation()
+            }
+        }
+    }
+}
+```
+
+# Input Format
+
+```
+Feature: [Screen or feature name]
+Data: [Models / API endpoints involved]
+Requirements:
+  - [Functional requirement 1]
+  - [Functional requirement 2]
+Shared State Needed: [user data, accountSummary cache, brand properties, etc.]
+```
+
+# Output Format
+
+```
+// MARK: - ViewModel
+@Observable
+class [Feature]ViewModel {
+    var ...
+    func load() async { ... }
+}
+
+// MARK: - View
+struct [Feature]View: View {
+    @State private var viewModel = [Feature]ViewModel()
+    @Environment(Router.self) private var router
+    var body: some View { ... }
+}
+```
+
+# Constraints
+
+- All NEW ViewModels MUST use `@Observable`, not `ObservableObject`.
+- Views MUST use `@State` for VM ownership (not `@StateObject`).
+- Shared objects MUST be injected via `.environment(obj)` and read via `@Environment(Type.self)`.
+- Two-way bindings use `@Bindable` — only when a child view needs `$property` access.
+- Networking MUST use async/await with `.task` modifier. No `DispatchQueue.main.async`.
+- Search debounce uses `Task.sleep` + cancellation, not Combine pipelines.
+- Cross-cutting events prefer @Observable EventBus over NotificationCenter for new code.
+- Minimum deployment target: iOS 17+ for @Observable. For iOS 16 support, fall back to ObservableObject.
+- No force unwraps. Use optional chaining and nil coalescing.
+- Feature folders: `Features/<Name>/View/` + `ViewModel/`.
+- One ViewModel per screen. Do not share ViewModels across screens.
+
+# Examples
+
+## Example 1: AccountSummary screen (modern @Observable + async/await)
+
+```swift
+@Observable
+class PortfolioViewModel {
+    var records: [HoldingModel] = []
+    var totalValue: Double = 0
+    var isLoading = false
+    var error: Error?
+
+    func fetchPortfolio() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            guard let userId = AppState.shared.user?.id else { return }
+            let response = try await NetworkService().request(
+                endpoint: .accountSummary,
+                params: ["user_id": userId]
+            )
+            if let accountSummary = response.decoder(with: PortfolioModel.self) {
+                records = accountSummary.records
+                totalValue = accountSummary.totalValue
+            }
+        } catch {
+            self.error = error
+        }
+    }
+}
+
+struct PortfolioView: View {
+    @State private var viewModel = PortfolioViewModel()
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        List(viewModel.records) { record in
+            HoldingRow(record: record)
+                .onTapGesture {
+                    router.navigate(to: .holdingDetail(id: record.id))
+                }
+        }
+        .task { await viewModel.fetchPortfolio() }
+        .refreshable { await viewModel.fetchPortfolio() }
+    }
+}
+```
+
+## Example 2: Form with two-way binding
+
+```swift
+@Observable
+class SIPCreationViewModel {
+    var selectedFundId: String
+    var amount: String = ""
+    var frequency: SIPFrequency = .monthly
+    var startDate = Date()
+    var isSubmitting = false
+    var result: SIPResponse?
+
+    init(itemId: String) {
+        self.selectedFundId = itemId
+    }
+
+    func createSIP() async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+        do {
+            let params: [String: Any] = [
+                "fund_id": selectedFundId,
+                "amount": Double(amount) ?? 0,
+                "frequency": frequency.rawValue,
+                "start_date": ISO8601DateFormatter().string(from: startDate)
+            ]
+            let response = try await NetworkService().request(
+                endpoint: .createSIP, params: params
+            )
+            result = response.decoder(with: SIPResponse.self)
+            EventBus.shared.triggerPortfolioRefresh()
+        } catch {
+            // handle error
+        }
+    }
+}
+
+struct SIPCreationView: View {
+    @Bindable var viewModel: SIPCreationViewModel
+
+    var body: some View {
+        Form {
+            TextField("Amount (₹)", text: $viewModel.amount)
+                .keyboardType(.numberPad)
+            Picker("Frequency", selection: $viewModel.frequency) {
+                ForEach(SIPFrequency.allCases, id: \.self) { freq in
+                    Text(freq.displayName).tag(freq)
+                }
+            }
+            DatePicker("Start Date", selection: $viewModel.startDate, displayedComponents: .date)
+
+            Button("Create RecurringPlan") {
+                Task { await viewModel.createSIP() }
+            }
+            .disabled(viewModel.isSubmitting || viewModel.amount.isEmpty)
+        }
+    }
+}
+```
+
+# Migration Guide (ObservableObject → @Observable)
+
+For codebases still on iOS 15+ with `ObservableObject`, migration is incremental:
+
+1. **Bump minimum target to iOS 17** when ready
+2. **Convert one ViewModel at a time**: remove `: ObservableObject`, add `@Observable`, remove all `@Published`
+3. **In the View**: change `@StateObject` → `@State`, `@EnvironmentObject` → `@Environment(Type.self)`
+4. **In the App struct**: change `.environmentObject(obj)` → `.environment(obj)`
+5. **For Bindings**: add `@Bindable` where the view needs `$property`
+6. **Test**: views that read only specific properties will now re-render less often (fine-grained tracking)
+
+The Router, LoaderManager, BrandPropertiesController, and AppState (Defaults) can all be converted independently.
+
+# Team Patterns (Legacy)
+
+These patterns exist in the current codebase (iOS 15+ target) and should be migrated
+to @Observable when the minimum target is raised to iOS 17:
+
+1. `ObservableObject` + `@Published` — still works, still compiles, but produces whole-object invalidation
+2. `@StateObject` / `@ObservedObject` / `@EnvironmentObject` — replaced by `@State` / plain property / `@Environment`
+3. `Defaults.shared` singleton — migrate to `@Observable AppState.shared`
+4. `NotificationCenter` for global events — migrate to `@Observable EventBus`
+5. Callback-based `Result<APIResponse?, NetworkError>` networking — migrate to async/await
+6. `DispatchQueue.main.async` in callbacks — eliminated by async/await + `@MainActor` inference on @Observable
+7. Combine `$searchText.debounce()` — replace with `Task.sleep` + cancellation

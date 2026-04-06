@@ -1,0 +1,68 @@
+---
+name: kafka-system-design
+version: 2.0.0
+domain: messaging
+description: Design Kafka-based event platforms with topic strategy, partitioning, ordering, retention, and consumer recovery.
+tags: [messaging, kafka, event-streaming, partitions, reliability]
+---
+
+## Purpose
+Design Kafka systems that preserve ordering where needed, scale cleanly, and recover from consumer or broker failure.
+
+## When to Use
+Use for high-throughput event pipelines, decoupled service integration, audit streams, and asynchronous domain propagation.
+
+## Input Format
+```yaml
+workload:
+  producers: string[]
+  consumers: string[]
+  message_types: string[]
+requirements:
+  throughput: string
+  ordering_scope: string
+  retention_days: number
+  replay_needed: boolean
+  exactly_once_preference: boolean
+```
+
+## Output Format
+```yaml
+topology:
+  topic_strategy: string
+  partition_key: string
+  replication_factor: number
+consumer_model:
+  groups: string[]
+  retry_path: string
+  dlq: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Identify message classes and their ordering boundaries.
+2. IF different consumers need different retention or replay semantics, split topics by use case.
+3. IF ordering is per aggregate, key partitions by aggregate ID.
+4. IF strict low-latency fanout is needed for devices, evaluate Kafka plus WebSocket or MQTT hybrid.
+5. Define retry, dead-letter, and replay controls before approving the design.
+
+## Rules
+1. Topic boundaries should reflect domain ownership, not team convenience alone.
+2. Partition count must account for future throughput, not only current load.
+3. Consumers must be idempotent.
+4. Track lag, rebalance frequency, and DLQ growth.
+5. Prefer schema registry for governed event evolution.
+
+## Constraints
+- Never mix unrelated event classes in one topic if retention or ownership differs materially.
+- Never promise global ordering across partitions.
+- Never design Kafka without backpressure and replay strategy.
+
+## Examples
+Input: marketplace platform with orders, payments, and analytics streams.
+Output: separate domain topics, aggregate-key partitioning, compacted reference topics, and consumer recovery paths.
+
+## Output Style
+Return a compact streaming blueprint with topic model, partition key, and reliability controls.

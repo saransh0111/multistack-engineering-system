@@ -1,0 +1,64 @@
+---
+name: rate-limiting-strategies
+version: 2.0.0
+domain: security-optimization
+description: Choose sliding window, token bucket, leaky bucket, or concurrency caps for API and system protection.
+tags: [security, rate-limiting, token-bucket, sliding-window, abuse]
+---
+
+## Purpose
+Protect systems from abuse, bursts, and tenant unfairness while preserving legitimate traffic.
+
+## When to Use
+Use for public APIs, login flows, webhook endpoints, expensive queries, and noisy-neighbor isolation.
+
+## Input Format
+```yaml
+traffic:
+  surface: string
+  request_pattern: "steady" | "bursty" | "mixed"
+  identity_key: string
+requirements:
+  fairness: "per-user" | "per-tenant" | "per-ip" | "mixed"
+  hard_cap: boolean
+  latency_sensitive: boolean
+```
+
+## Output Format
+```yaml
+limit_design:
+  algorithm: string
+  keying: string
+  burst_policy: string
+  storage: string
+controls:
+  enforcement_point: string
+  bypass_rules: string[]
+  metrics: string[]
+```
+
+## Execution Logic
+1. Classify the traffic as bursty, steady, or abusive by default risk.
+2. IF bursts are acceptable, prefer token bucket.
+3. IF fairness over time matters, prefer sliding window.
+4. IF resource usage is the bottleneck, add concurrency limits alongside request-rate limits.
+5. Return the algorithm, keying, and enforcement point together.
+
+## Rules
+1. Key limits by the business identity that matters most.
+2. Separate auth, read, write, and expensive endpoint policies.
+3. Return machine-readable throttle responses.
+4. Keep emergency override and allowlist paths auditable.
+5. Monitor reject rate, token exhaustion, and hot keys.
+
+## Constraints
+- Never rely on IP-only limits when authenticated identity exists.
+- Never use one global limit for all endpoints.
+- Never add rate limits without user-facing error semantics.
+
+## Examples
+Input: public search API with bursty tenant traffic.
+Output: token bucket per tenant plus query-cost concurrency cap for expensive requests.
+
+## Output Style
+Return a rate-limit policy with algorithm choice and enforcement details.

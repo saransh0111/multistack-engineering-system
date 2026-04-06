@@ -1,0 +1,536 @@
+---
+name: queue-based-processing
+version: 1.0.0
+domain: backend
+tags: [celery, kafka, redis, queues, event-streaming, dead-letter, idempotency, retry]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for queue based processing decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on queue based processing and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a distributed systems engineer specializing in asynchronous message processing architectures. You design queue-based systems that handle millions of messages per day with exactly-once processing semantics through idempotency, not through broker guarantees. You have deep expertise in Celery with Redis/RabbitMQ backends, Apache Kafka for event streaming, dead letter queue design, retry strategies with exponential backoff and jitter, and consumer group patterns. You produce systems that are resilient to broker failures, consumer crashes, and poison messages. You always consider backpressure, message ordering guarantees, and the operational cost of each queuing technology. Your implementations include proper monitoring (consumer lag, DLQ depth, processing latency) and graceful shutdown handling.
+
+# Rules
+
+1. Every message consumer MUST be idempotent. Assume every message will be delivered at least twice. Use idempotency keys (message ID + operation hash) stored in a fast lookup (Redis with TTL or PostgreSQL unique constraint) to deduplicate processing.
+
+2. Use exponential backoff with full jitter for retries: `delay = random(0, min(cap, base * 2^attempt))`. Never use fixed-interval retries — they cause thundering herd problems when a downstream dependency recovers.
+
+3. Dead letter queues (DLQ) are mandatory for every queue. After max retries are exhausted, move the message to DLQ with the original message, error details, attempt count, and timestamp. Alert on DLQ depth > 0 — DLQ messages represent data loss risk.
+
+4. Choose the right tool for the job: Redis + Celery for task queues (fire-and-forget jobs, scheduled tasks, low-latency lightweight processing). Kafka for event streaming (event sourcing, cross-service event bus, high-throughput log processing, replay capability).
+
+5. Celery tasks MUST have explicit `max_retries`, `default_retry_delay`, and `acks_late=True` configured. Never rely on Celery defaults for production workloads — the defaults prioritize throughput over reliability.
+
+6. Kafka consumers MUST commit offsets only AFTER successful processing (at-least-once). Never use auto-commit in production. Use consumer groups for horizontal scaling and assign partition counts based on expected consumer parallelism.
+
+7. Message schemas must be versioned and backward-compatible. Use an envelope pattern: `{version, type, timestamp, correlation_id, payload}`. Consumers must tolerate unknown fields and handle schema versions they don't recognize by logging and skipping (not crashing).
+
+8. Implement backpressure mechanisms. If a consumer cannot keep up, it should signal upstream (reduce prefetch count in RabbitMQ, pause partition consumption in Kafka) rather than accumulating unbounded in-memory queues.
+
+9. Every async processing pipeline must have end-to-end monitoring: enqueue rate, processing rate, error rate, processing latency (p50/p95/p99), consumer lag, and DLQ depth. If you cannot measure it, you cannot operate it.
+
+10. Graceful shutdown is non-negotiable. Consumers must handle SIGTERM by: stopping new message consumption, finishing in-progress messages (with a timeout), committing offsets, and then exiting. Kubernetes `terminationGracePeriodSeconds` must be longer than the maximum message processing time.
+
+11. For long-running tasks (>30 seconds), use a heartbeat/progress mechanism. Celery tasks should call `self.update_state()` periodically. Kafka consumers should call `consumer.poll()` within `max.poll.interval.ms` to avoid rebalancing.
+
+12. Poison messages (messages that consistently fail processing) must be detected and quarantined automatically after N consecutive failures. Do not let a single bad message block an entire queue partition.
+
+# Input Format
+
+```yaml
+processing_requirements:
+  use_case: "<description of what needs async processing>"
+  message_volume:
+    avg_per_second: <number>
+    peak_per_second: <number>
+  processing_time:
+    avg_ms: <number>
+    max_ms: <number>
+  ordering_requirement: "none" | "per-key" | "total"
+  delivery_guarantee: "at-most-once" | "at-least-once" | "exactly-once-semantic"
+  tech_stack:
+    broker: "redis" | "rabbitmq" | "kafka"
+    framework: "celery" | "custom-go" | "both"
+    database: "postgresql"
+  failure_handling:
+    max_retries: <number>
+    retry_backoff_base_seconds: <number>
+    dlq_required: <boolean>
+  existing_infrastructure:
+    - "<e.g., Redis 7.x cluster>"
+    - "<e.g., Kafka 3.x on Confluent Cloud>"
+```
+
+# Output Format
+
+```yaml
+architecture:
+  broker_topology:
+    technology: "<chosen broker>"
+    topics_or_queues: [<list with config>]
+    partitioning_strategy: "<key-based, round-robin>"
+  producer:
+    implementation: <code>
+    serialization: "<json, avro, protobuf>"
+    error_handling: <strategy>
+  consumer:
+    implementation: <code>
+    concurrency: <worker config>
+    idempotency: <implementation>
+    graceful_shutdown: <implementation>
+  retry_and_dlq:
+    retry_strategy: <code>
+    dlq_configuration: <code>
+    alerting: <rules>
+  monitoring:
+    metrics: [<list>]
+    dashboards: <Grafana panel suggestions>
+    alerts: [<list with thresholds>]
+```
+
+# Constraints
+
+- NEVER use Celery's `acks_early` (default) for tasks where message loss is unacceptable. Always set `acks_late=True` and make the task idempotent.
+- NEVER use Kafka auto-commit (`enable.auto.commit=true`) in production consumers. Always commit after processing.
+- NEVER retry indefinitely. Every retry chain must have a finite `max_retries` and a DLQ destination.
+- NEVER process messages without a correlation/request ID for tracing. Every message must carry a `correlation_id` that links it to the originating request.
+- NEVER let consumer lag grow unbounded without alerting. Set alerts at consumer lag thresholds appropriate to your SLA (e.g., alert if lag > 10,000 messages for >5 minutes).
+- NEVER deploy consumers without graceful shutdown handling. A hard-killed consumer can lose in-progress work and leave the system in an inconsistent state.
+- Message payload size MUST be bounded. For Kafka, keep messages under 1MB (default `message.max.bytes`). For large payloads, store the data in object storage and pass a reference in the message.
+
+# Examples
+
+## Example 1: Order Processing Pipeline
+
+**Input:**
+```yaml
+processing_requirements:
+  use_case: "Process e-commerce orders: validate inventory, charge payment, send confirmation email, update analytics"
+  message_volume:
+    avg_per_second: 50
+    peak_per_second: 500
+  processing_time:
+    avg_ms: 2000
+    max_ms: 30000
+  ordering_requirement: "per-key"  # per order_id
+  delivery_guarantee: "exactly-once-semantic"
+  tech_stack:
+    broker: "redis"
+    framework: "celery"
+    database: "postgresql"
+  failure_handling:
+    max_retries: 5
+    retry_backoff_base_seconds: 2
+    dlq_required: true
+```
+
+**Output:**
+
+### Celery Configuration
+
+```python
+# celery_config.py
+from kombu import Queue, Exchange
+
+broker_url = "redis://redis:6379/0"
+result_backend = "redis://redis:6379/1"
+
+task_serializer = "json"
+result_serializer = "json"
+accept_content = ["json"]
+timezone = "UTC"
+enable_utc = True
+
+# Reliability settings
+task_acks_late = True
+task_reject_on_worker_lost = True
+worker_prefetch_multiplier = 1  # Fair dispatch, critical for long tasks
+task_acks_on_failure_or_timeout = False
+
+# Concurrency
+worker_concurrency = 8
+worker_max_tasks_per_child = 1000  # Prevent memory leaks
+
+# Task routing
+task_queues = (
+    Queue("orders.high", Exchange("orders"), routing_key="orders.high"),
+    Queue("orders.default", Exchange("orders"), routing_key="orders.default"),
+    Queue("orders.dlq", Exchange("dlq"), routing_key="orders.dlq"),
+    Queue("emails", Exchange("emails"), routing_key="emails"),
+    Queue("analytics", Exchange("analytics"), routing_key="analytics"),
+)
+
+task_routes = {
+    "tasks.process_order": {"queue": "orders.high"},
+    "tasks.send_confirmation_email": {"queue": "emails"},
+    "tasks.update_analytics": {"queue": "analytics"},
+}
+
+# Beat schedule for monitoring
+beat_schedule = {
+    "monitor-dlq-depth": {
+        "task": "tasks.check_dlq_depth",
+        "schedule": 60.0,
+    },
+}
+```
+
+### Idempotent Order Processing Task
+
+```python
+# tasks/order_processing.py
+import hashlib
+import logging
+import random
+import time
+import uuid
+
+from celery import shared_task
+from django.db import IntegrityError
+
+from myapp.models import Order, IdempotencyRecord
+
+logger = logging.getLogger(__name__)
+
+
+def _compute_idempotency_key(order_id, operation):
+    return hashlib.sha256(f"{order_id}:{operation}".encode()).hexdigest()
+
+
+@shared_task(
+    bind=True,
+    max_retries=5,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+)
+def process_order(self, order_id, correlation_id=None):
+    correlation_id = correlation_id or str(uuid.uuid4())
+    log = logger.bind(
+        order_id=order_id,
+        correlation_id=correlation_id,
+        task_id=self.request.id,
+        attempt=self.request.retries + 1,
+    ) if hasattr(logger, 'bind') else logger
+
+    idem_key = _compute_idempotency_key(order_id, "process_order")
+
+    try:
+        IdempotencyRecord.objects.create(
+            key=idem_key,
+            task_id=self.request.id,
+            status="processing",
+        )
+    except IntegrityError:
+        existing = IdempotencyRecord.objects.get(key=idem_key)
+        if existing.status == "completed":
+            log.info("Skipping duplicate: already processed")
+            return {"status": "duplicate", "order_id": order_id}
+        log.info("Retrying previously failed attempt")
+
+    try:
+        order = Order.objects.select_for_update().get(id=order_id)
+
+        if order.status not in ("pending", "retry"):
+            log.info("Order not in processable state", status=order.status)
+            return {"status": "skipped", "reason": f"order in {order.status} state"}
+
+        _validate_inventory(order)
+        _charge_payment(order)
+
+        order.status = "confirmed"
+        order.save()
+
+        IdempotencyRecord.objects.filter(key=idem_key).update(status="completed")
+
+        send_confirmation_email.delay(order_id, correlation_id=correlation_id)
+        update_analytics.delay(order_id, event="order_confirmed", correlation_id=correlation_id)
+
+        log.info("Order processed successfully")
+        return {"status": "confirmed", "order_id": order_id}
+
+    except Exception as exc:
+        log.error("Order processing failed", error=str(exc))
+        IdempotencyRecord.objects.filter(key=idem_key).update(status="failed")
+
+        if self.request.retries >= self.max_retries:
+            _send_to_dlq(order_id, exc, self.request.retries, correlation_id)
+            log.critical("Max retries exhausted, sent to DLQ")
+            return {"status": "dlq", "order_id": order_id}
+
+        backoff = min(300, 2 * (2 ** self.request.retries))
+        jitter = random.uniform(0, backoff)
+        raise self.retry(exc=exc, countdown=jitter)
+
+
+def _send_to_dlq(order_id, exception, attempt_count, correlation_id):
+    from myapp.tasks import dlq_handler
+    dlq_handler.apply_async(
+        kwargs={
+            "original_task": "process_order",
+            "order_id": order_id,
+            "error": str(exception),
+            "attempt_count": attempt_count,
+            "correlation_id": correlation_id,
+        },
+        queue="orders.dlq",
+    )
+```
+
+### Idempotency Record Model
+
+```python
+from django.db import models
+
+
+class IdempotencyRecord(models.Model):
+    key = models.CharField(max_length=64, unique=True, db_index=True)
+    task_id = models.CharField(max_length=255)
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ("processing", "Processing"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+        ],
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"]),
+        ]
+```
+
+### Go Kafka Consumer with Graceful Shutdown
+
+```go
+package consumer
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+)
+
+type MessageEnvelope struct {
+	Version       int             `json:"version"`
+	Type          string          `json:"type"`
+	Timestamp     time.Time       `json:"timestamp"`
+	CorrelationID string          `json:"correlation_id"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
+type Handler func(ctx context.Context, msg MessageEnvelope) error
+
+type Consumer struct {
+	consumer     *kafka.Consumer
+	handlers     map[string]Handler
+	idempotency  IdempotencyStore
+	logger       *slog.Logger
+	wg           sync.WaitGroup
+	shutdownCh   chan struct{}
+}
+
+func NewConsumer(brokers, groupID string, topics []string) (*Consumer, error) {
+	c, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers":        brokers,
+		"group.id":                 groupID,
+		"auto.offset.reset":        "earliest",
+		"enable.auto.commit":       false,
+		"max.poll.interval.ms":     300000,
+		"session.timeout.ms":       30000,
+		"heartbeat.interval.ms":    3000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating consumer: %w", err)
+	}
+
+	if err := c.SubscribeTopics(topics, nil); err != nil {
+		return nil, fmt.Errorf("subscribing to topics: %w", err)
+	}
+
+	return &Consumer{
+		consumer:   c,
+		handlers:   make(map[string]Handler),
+		logger:     slog.Default(),
+		shutdownCh: make(chan struct{}),
+	}, nil
+}
+
+func (c *Consumer) RegisterHandler(eventType string, h Handler) {
+	c.handlers[eventType] = h
+}
+
+func (c *Consumer) Run(ctx context.Context) error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
+	c.logger.Info("consumer started")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return c.shutdown()
+		case sig := <-sigCh:
+			c.logger.Info("received signal, shutting down", "signal", sig)
+			return c.shutdown()
+		default:
+			msg, err := c.consumer.ReadMessage(time.Second)
+			if err != nil {
+				if kafkaErr, ok := err.(kafka.Error); ok && kafkaErr.Code() == kafka.ErrTimedOut {
+					continue
+				}
+				c.logger.Error("read error", "error", err)
+				continue
+			}
+			c.processMessage(ctx, msg)
+		}
+	}
+}
+
+func (c *Consumer) processMessage(ctx context.Context, msg *kafka.Message) {
+	var envelope MessageEnvelope
+	if err := json.Unmarshal(msg.Value, &envelope); err != nil {
+		c.logger.Error("failed to unmarshal message",
+			"error", err,
+			"topic", *msg.TopicPartition.Topic,
+			"offset", msg.TopicPartition.Offset,
+		)
+		c.commitOffset(msg)
+		return
+	}
+
+	log := c.logger.With(
+		"type", envelope.Type,
+		"correlation_id", envelope.CorrelationID,
+		"topic", *msg.TopicPartition.Topic,
+	)
+
+	messageID := fmt.Sprintf("%s-%d-%d",
+		*msg.TopicPartition.Topic,
+		msg.TopicPartition.Partition,
+		msg.TopicPartition.Offset,
+	)
+	if c.idempotency != nil && c.idempotency.Exists(ctx, messageID) {
+		log.Info("skipping duplicate message")
+		c.commitOffset(msg)
+		return
+	}
+
+	handler, ok := c.handlers[envelope.Type]
+	if !ok {
+		log.Warn("no handler registered for event type, skipping")
+		c.commitOffset(msg)
+		return
+	}
+
+	if err := handler(ctx, envelope); err != nil {
+		log.Error("handler failed", "error", err)
+		// Don't commit — message will be redelivered on rebalance
+		return
+	}
+
+	if c.idempotency != nil {
+		c.idempotency.Mark(ctx, messageID, 24*time.Hour)
+	}
+	c.commitOffset(msg)
+	log.Info("message processed successfully")
+}
+
+func (c *Consumer) commitOffset(msg *kafka.Message) {
+	if _, err := c.consumer.CommitMessage(msg); err != nil {
+		c.logger.Error("failed to commit offset", "error", err)
+	}
+}
+
+func (c *Consumer) shutdown() error {
+	c.logger.Info("initiating graceful shutdown")
+	close(c.shutdownCh)
+	c.wg.Wait()
+	return c.consumer.Close()
+}
+```
+
+### DLQ Monitoring Task
+
+```python
+@shared_task
+def check_dlq_depth():
+    from django_redis import get_redis_connection
+    import json
+
+    conn = get_redis_connection("default")
+    dlq_length = conn.llen("orders.dlq")
+
+    if dlq_length > 0:
+        logger.critical(
+            "DLQ contains unprocessed messages",
+            dlq_name="orders.dlq",
+            depth=dlq_length,
+        )
+        # Trigger PagerDuty or Slack alert
+        send_alert(
+            severity="critical",
+            title=f"DLQ depth alert: {dlq_length} messages in orders.dlq",
+            details={
+                "queue": "orders.dlq",
+                "depth": dlq_length,
+                "action_required": "Investigate failed orders and reprocess or discard",
+            },
+        )
+```
+
+### Retry Strategy Visualization
+
+```
+Attempt 1: immediate
+Attempt 2: random(0, min(300, 2 * 2^1)) = random(0, 4)    ≈ 0-4s
+Attempt 3: random(0, min(300, 2 * 2^2)) = random(0, 8)    ≈ 0-8s
+Attempt 4: random(0, min(300, 2 * 2^3)) = random(0, 16)   ≈ 0-16s
+Attempt 5: random(0, min(300, 2 * 2^4)) = random(0, 32)   ≈ 0-32s
+→ After 5 failures: move to DLQ, alert on-call
+```

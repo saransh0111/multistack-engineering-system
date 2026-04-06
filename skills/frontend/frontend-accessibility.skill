@@ -1,0 +1,66 @@
+---
+name: frontend-accessibility
+version: 2.0.0
+domain: frontend
+description: Design and review frontend systems for WCAG conformance, semantic structure, keyboard access, and assistive technology compatibility.
+tags: [frontend, accessibility, wcag, a11y, ux]
+---
+
+## Purpose
+Make frontend output accessible by default instead of treating accessibility as a post-build audit.
+
+## When to Use
+Use when building or reviewing pages, design systems, component libraries, or flows that must meet WCAG AA or higher.
+
+## Input Format
+```yaml
+surface:
+  type: "page" | "component" | "design-system" | "flow"
+  framework: string
+requirements:
+  wcag_target: "AA" | "AAA"
+  locales: string[]
+  assistive_tech_support: string[]
+risks:
+  interaction_patterns: string[]
+```
+
+## Output Format
+```yaml
+accessibility_plan:
+  semantic_structure: string[]
+  keyboard_model: string[]
+  screen_reader_notes: string[]
+verification:
+  automated_checks: string[]
+  manual_checks: string[]
+risks:
+  - issue: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Identify structure, interaction, and content requirements.
+2. IF a native HTML element satisfies the behavior, use it over a custom widget.
+3. Define keyboard flow, focus management, labels, and announcement behavior.
+4. Check color contrast, motion reduction, responsive zoom, and form error recovery.
+5. Return automated and manual validation steps together.
+
+## Rules
+1. Semantic HTML first.
+2. Every interactive control must be keyboard reachable and visibly focusable.
+3. Motion-heavy UI must respect `prefers-reduced-motion`.
+4. Error states must be programmatically associated with inputs.
+5. Accessibility requirements apply to empty, loading, and error states too.
+
+## Constraints
+- Never use placeholder text as the only label.
+- Never trap focus without an explicit escape path.
+- Never ship color-only status signals.
+
+## Examples
+Input: authenticated dashboard with modal filters and chart controls.
+Output: landmark structure, focus-return rules, chart fallbacks, and validation checklist.
+
+## Output Style
+Return an accessibility brief with concrete fixes and test steps.

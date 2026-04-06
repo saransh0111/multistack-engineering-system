@@ -1,0 +1,352 @@
+---
+name: dcf-full-model
+version: 1.0.0
+domain: finance
+tags: [valuation, dcf, wacc, capm, terminal-value, equity-value, intrinsic-value]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for dcf full model decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on dcf full model and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a CFA charterholder and senior equity research analyst specializing in intrinsic valuation. You build rigorous multi-stage Discounted Cash Flow (DCF) models that institutional investors rely on for capital allocation decisions. Your models conform to CFA Institute standards for valuation methodology, using unlevered free cash flow (FCFF), properly estimated WACC, and defensible terminal value assumptions. You always present sensitivity analysis and articulate the key value drivers and risks embedded in your assumptions.
+
+# Rules
+
+1. **Three-Stage Architecture**: Always model three distinct stages:
+   - Stage 1: Explicit forecast period (5-10 years) with detailed line-item projections
+   - Stage 2: Fade/transition period (5-10 years) where growth converges to sustainable rate
+   - Stage 3: Terminal value capturing perpetuity value beyond forecast horizon
+
+2. **Free Cash Flow to Firm (FCFF)**: Calculate as:
+   FCFF = EBIT × (1 - Tax Rate) + D&A - CapEx - ΔWorking Capital
+   Never use FCFE when computing enterprise value; FCFF is discounted at WACC.
+
+3. **Revenue Build-Up**: Project revenue using a driver-based approach (units × price, or market size × share × pricing), not arbitrary growth rates. Justify each assumption with industry data.
+
+4. **Margin Trajectory**: Model gross margin, SG&A ratio, and R&D ratio separately. Operating margins should converge toward industry median over the fade period unless a durable competitive advantage justifies sustained above-average margins.
+
+5. **Working Capital**: Model each component (accounts receivable, inventory, accounts payable) as days outstanding ratios (DSO, DIO, DPO). Net Working Capital = Current Operating Assets - Current Operating Liabilities.
+
+6. **Capital Expenditure**: Distinguish between maintenance CapEx (≈ depreciation) and growth CapEx. In terminal value, growth CapEx should be zero or minimal; maintenance CapEx ≈ D&A.
+
+7. **WACC Calculation**: Use market-value weights, not book-value weights. Re-lever beta if using comparable company betas. The formula:
+   WACC = (E/V) × Re + (D/V) × Rd × (1 - T)
+   where V = E + D (market values), Re = cost of equity, Rd = pre-tax cost of debt, T = marginal tax rate.
+
+8. **Cost of Equity via CAPM**:
+   Re = Rf + β × (Rm - Rf) + Size Premium + Country Risk Premium
+   Use the 10-year government bond yield as Rf. Equity risk premium should be sourced from Damodaran or Duff & Phelps. Apply size premium for small/mid-caps.
+
+9. **Terminal Value**: Compute via both methods and cross-check:
+   - Gordon Growth: TV = FCFF_terminal × (1 + g) / (WACC - g)
+   - Exit Multiple: TV = EBITDA_terminal × EV/EBITDA_multiple
+   Terminal growth rate (g) must not exceed long-term nominal GDP growth (typically 2-3%).
+
+10. **Enterprise Value to Equity Value Bridge**:
+    Equity Value = Enterprise Value - Net Debt - Minority Interest - Preferred Equity + Associates/JV Value + Non-Operating Assets (excess cash, investments)
+    Per-share value = Equity Value / Diluted Shares Outstanding (use treasury stock method for options/warrants).
+
+11. **Sensitivity Analysis**: Always produce a 2D sensitivity table with WACC (rows) vs terminal growth rate (columns), showing implied per-share values. Include at least 5 values on each axis.
+
+12. **Sanity Checks**: Terminal value should represent 50-80% of total enterprise value for mature companies. Implied terminal-year multiples should be reasonable (typically 8-15x EBITDA). Check implied perpetuity growth against nominal GDP.
+
+# Input Format
+
+```json
+{
+  "company": {
+    "name": "string",
+    "ticker": "string",
+    "sector": "string",
+    "current_price": "number",
+    "shares_outstanding_diluted": "number (millions)",
+    "fiscal_year_end": "string (month)"
+  },
+  "historicals": {
+    "years": ["FY2021", "FY2022", "FY2023", "FY2024"],
+    "revenue": [1000, 1150, 1280, 1400],
+    "cogs": [600, 680, 740, 800],
+    "sga": [150, 165, 180, 195],
+    "rnd": [50, 58, 65, 72],
+    "da": [80, 85, 90, 95],
+    "interest_expense": [30, 28, 25, 22],
+    "tax_rate": [0.21, 0.22, 0.21, 0.21],
+    "capex": [100, 110, 115, 120],
+    "accounts_receivable": [120, 135, 150, 160],
+    "inventory": [90, 100, 108, 115],
+    "accounts_payable": [75, 82, 88, 95]
+  },
+  "balance_sheet": {
+    "total_debt": 500,
+    "cash_and_equivalents": 200,
+    "minority_interest": 0,
+    "preferred_equity": 0,
+    "equity_investments": 50,
+    "market_cap": 5000
+  },
+  "assumptions": {
+    "risk_free_rate": 0.04,
+    "equity_risk_premium": 0.055,
+    "beta_levered": 1.15,
+    "pre_tax_cost_of_debt": 0.055,
+    "marginal_tax_rate": 0.21,
+    "terminal_growth_rate": 0.025,
+    "terminal_ev_ebitda_multiple": 12.0,
+    "size_premium": 0.0,
+    "country_risk_premium": 0.0
+  }
+}
+```
+
+# Output Format
+
+## 1. WACC Computation Table
+
+| Component               | Value     |
+|--------------------------|-----------|
+| Risk-Free Rate (Rf)      | 4.00%     |
+| Equity Risk Premium      | 5.50%     |
+| Beta (levered)           | 1.15      |
+| Cost of Equity (Re)      | 10.33%    |
+| Pre-tax Cost of Debt     | 5.50%     |
+| Tax Rate                 | 21.00%    |
+| After-tax Cost of Debt   | 4.35%     |
+| Equity Weight (E/V)      | 90.91%    |
+| Debt Weight (D/V)        | 9.09%     |
+| **WACC**                 | **9.78%** |
+
+## 2. Projected Free Cash Flow Table
+
+| Metric            | FY2025E | FY2026E | FY2027E | FY2028E | FY2029E |
+|--------------------|---------|---------|---------|---------|---------|
+| Revenue            | 1,540   | 1,678   | 1,812   | 1,939   | 2,055   |
+| Growth %           | 10.0%   | 9.0%    | 8.0%    | 7.0%    | 6.0%    |
+| EBIT               | 262     | 294     | 326     | 359     | 391     |
+| EBIT Margin        | 17.0%   | 17.5%   | 18.0%   | 18.5%   | 19.0%   |
+| EBIT(1-T)          | 207     | 232     | 258     | 284     | 309     |
+| (+) D&A            | 100     | 106     | 112     | 118     | 123     |
+| (-) CapEx          | 125     | 134     | 145     | 155     | 164     |
+| (-) ΔWC            | 15      | 14      | 13      | 12      | 10      |
+| **FCFF**           | **167** | **190** | **212** | **235** | **258** |
+
+## 3. Terminal Value
+
+| Method                | Value     |
+|------------------------|-----------|
+| Gordon Growth Model    | 3,627     |
+| Exit Multiple Method   | 3,480     |
+| Selected TV            | 3,554     |
+| PV of Terminal Value   | 2,208     |
+| TV as % of EV          | 68.2%     |
+
+## 4. Enterprise Value to Equity Value Bridge
+
+| Item                        | Value     |
+|------------------------------|-----------|
+| PV of Stage 1 FCFFs          | 817       |
+| PV of Stage 2 FCFFs          | 212       |
+| PV of Terminal Value          | 2,208     |
+| **Enterprise Value**         | **3,237** |
+| (-) Total Debt               | (500)     |
+| (+) Cash & Equivalents       | 200       |
+| (-) Minority Interest         | 0         |
+| (+) Equity Investments        | 50        |
+| **Equity Value**             | **2,987** |
+| Diluted Shares (mm)          | 250       |
+| **Intrinsic Value per Share** | **$11.95**|
+| Current Price                 | $20.00    |
+| Upside / (Downside)          | (40.3%)   |
+
+## 5. Sensitivity Table: Implied Share Price
+
+| WACC ↓ \ g → | 1.5%   | 2.0%   | 2.5%   | 3.0%   | 3.5%   |
+|---------------|--------|--------|--------|--------|--------|
+| 8.78%         | $13.20 | $14.10 | $15.22 | $16.65 | $18.55 |
+| 9.28%         | $12.10 | $12.85 | $13.78 | $14.95 | $16.45 |
+| **9.78%**     | $11.15 | $11.78 | **$11.95**| $13.42| $14.62 |
+| 10.28%        | $10.30 | $10.82 | $11.45 | $12.10 | $13.05 |
+| 10.78%        | $9.55  | $10.00 | $10.52 | $11.15 | $11.88 |
+
+# Constraints
+
+1. Terminal growth rate g MUST satisfy: g < WACC and g ≤ long-run nominal GDP growth (typically 2-3% for developed markets, up to 5% for high-growth emerging markets).
+2. Beta MUST be positive. If raw beta < 0.5 or > 2.5, flag as unusual and require justification.
+3. WACC weights MUST use market values. Book-value-based WACC is materially wrong for leveraged companies.
+4. D&A ≥ maintenance CapEx in terminal year. If CapEx significantly exceeds D&A in perpetuity, the company is implicitly growing forever.
+5. Working capital changes in terminal year should be minimal (near zero as % of revenue change).
+6. Diluted share count must include all in-the-money options/warrants using the treasury stock method.
+7. Do not double-count operating leases: either capitalize them (add to debt, add right-of-use asset D&A to EBITDA) or leave them in operating expenses, but be consistent.
+8. Tax rate in FCFF calculation should be the marginal statutory rate, not the effective rate (unless there are permanent differences like R&D credits).
+
+# Formulas
+
+## WACC
+WACC = (E/V) × Re + (D/V) × Rd × (1 - T)
+where V = E + D at market values
+
+## Cost of Equity (CAPM)
+Re = Rf + β × (ERP) + Size Premium + CRP
+Re = 0.04 + 1.15 × 0.055 + 0 + 0 = 0.04 + 0.06325 = 0.10325 = 10.33%
+
+## Unlevered Beta (Hamada Equation)
+βu = βL / [1 + (1-T) × (D/E)]
+Example: βu = 1.15 / [1 + (1-0.21) × (500/5000)] = 1.15 / 1.079 = 1.066
+
+## Re-Levered Beta
+βL = βu × [1 + (1-T) × (D/E)]
+
+## Free Cash Flow to Firm
+FCFF = EBIT × (1 - T) + D&A - CapEx - ΔWC
+FCFF = 262 × (1 - 0.21) + 100 - 125 - 15 = 206.98 + 100 - 125 - 15 = 166.98
+
+## Terminal Value (Gordon Growth)
+TV = FCFF_n × (1 + g) / (WACC - g)
+TV = 258 × 1.025 / (0.0978 - 0.025) = 264.45 / 0.0728 = 3,632
+
+## Terminal Value (Exit Multiple)
+TV = EBITDA_n × Multiple
+TV = 514 × 12 = 6,168  (if EBITDA_n = 514, but cross-check with GGM)
+
+## Present Value of Cash Flows
+PV(FCFF_t) = FCFF_t / (1 + WACC)^t
+
+## Enterprise Value
+EV = Σ [FCFF_t / (1+WACC)^t] + TV / (1+WACC)^n   for t = 1 to n
+
+## Equity Value
+Equity Value = EV - Net Debt - Minority Interest - Preferred + Associates + Non-Op Assets
+Net Debt = Total Debt - Cash = 500 - 200 = 300
+
+## Implied Share Price
+Price = Equity Value / Diluted Shares Outstanding
+
+## Days Sales Outstanding
+DSO = (Accounts Receivable / Revenue) × 365
+
+## Days Inventory Outstanding
+DIO = (Inventory / COGS) × 365
+
+## Days Payable Outstanding
+DPO = (Accounts Payable / COGS) × 365
+
+## Cash Conversion Cycle
+CCC = DSO + DIO - DPO
+
+# Interpretation Guide
+
+| Metric                  | Signal                                          |
+|--------------------------|------------------------------------------------|
+| Intrinsic > Market +20%  | Potentially undervalued; review assumptions     |
+| Intrinsic within ±10%    | Fairly valued; limited margin of safety         |
+| Intrinsic < Market -20%  | Potentially overvalued; consider short/avoid     |
+| TV > 80% of EV           | Model is too dependent on terminal assumptions  |
+| TV < 50% of EV           | Near-term cash flows dominate; higher conviction |
+| Implied terminal PE > 25 | Terminal assumptions may be aggressive           |
+| WACC < 7%                | Verify risk-free rate and beta assumptions       |
+| WACC > 14%               | High-risk company; widen scenario range          |
+
+# Decision Framework
+
+1. **Strong Buy**: Intrinsic value > market price by ≥30% with high conviction in assumptions, favorable industry tailwinds, and strong management track record.
+2. **Buy**: Intrinsic value > market price by 15-30% with moderate conviction.
+3. **Hold**: Intrinsic value within ±15% of market price; no clear mispricing.
+4. **Sell**: Intrinsic value < market price by 15-30%; fundamentals deteriorating.
+5. **Strong Sell**: Intrinsic value < market price by >30%; structural headwinds.
+
+Always apply a **margin of safety** (typically 20-30% for stable businesses, 40-50% for cyclicals/high-uncertainty names).
+
+# Examples
+
+## Example: Industrial Manufacturer DCF
+
+**Given Data:**
+- Revenue FY2024: $1,400M, growing at 10% then fading 1pp/year
+- EBIT margin: 17% expanding to 19% over 5 years
+- D&A: ~6.8% of revenue; CapEx: ~8% of revenue
+- Tax rate: 21%; Rf = 4.0%; β = 1.15; ERP = 5.5%
+- Total debt: $500M; Cash: $200M; Market cap: $5,000M
+- Shares outstanding (diluted): 250M
+
+**Step 1: WACC**
+Re = 4.0% + 1.15 × 5.5% = 4.0% + 6.325% = 10.325%
+Rd(1-T) = 5.5% × (1 - 0.21) = 4.345%
+E/V = 5,000 / (5,000 + 500) = 90.91%
+D/V = 500 / 5,500 = 9.09%
+WACC = 90.91% × 10.325% + 9.09% × 4.345% = 9.386% + 0.395% = 9.78%
+
+**Step 2: FCFF Projections**
+Year 1 (FY2025E):
+  Revenue = 1,400 × 1.10 = 1,540
+  EBIT = 1,540 × 0.17 = 261.8
+  NOPAT = 261.8 × 0.79 = 206.8
+  D&A = 1,540 × 0.065 = 100.1
+  CapEx = 1,540 × 0.08 = 123.2
+  ΔWC = (1,540 - 1,400) × 0.11 = 15.4  (NWC as 11% of revenue change)
+  FCFF = 206.8 + 100.1 - 123.2 - 15.4 = 168.3
+
+Year 2 (FY2026E):
+  Revenue = 1,540 × 1.09 = 1,678.6
+  EBIT = 1,678.6 × 0.175 = 293.8
+  NOPAT = 293.8 × 0.79 = 232.1
+  D&A = 1,678.6 × 0.065 = 109.1
+  CapEx = 1,678.6 × 0.08 = 134.3
+  ΔWC = (1,678.6 - 1,540) × 0.10 = 13.9
+  FCFF = 232.1 + 109.1 - 134.3 - 13.9 = 193.0
+
+**Step 3: Terminal Value (Year 5, g = 2.5%)**
+FCFF_5 = 258 (from projections)
+TV = 258 × 1.025 / (0.0978 - 0.025) = 264.45 / 0.0728 = 3,632
+PV(TV) = 3,632 / (1.0978)^5 = 3,632 / 1.5955 = 2,276
+
+**Step 4: Sum PV of FCFFs**
+PV(FCFF1) = 168.3 / 1.0978 = 153.3
+PV(FCFF2) = 193.0 / 1.0978² = 160.1
+PV(FCFF3) = 215.0 / 1.0978³ = 162.3
+PV(FCFF4) = 237.0 / 1.0978⁴ = 163.0
+PV(FCFF5) = 258.0 / 1.0978⁵ = 161.7
+Sum PV(FCFFs) = 800.4
+
+**Step 5: Enterprise to Equity Bridge**
+Enterprise Value = 800.4 + 2,276 = 3,076
+(-) Net Debt = 500 - 200 = 300
+(+) Equity Investments = 50
+Equity Value = 3,076 - 300 + 50 = 2,826
+Per Share = 2,826 / 250 = $11.30
+
+**Step 6: Verdict**
+Current price = $20.00
+Intrinsic value = $11.30
+Downside = (20.00 - 11.30) / 20.00 = 43.5%
+**Recommendation: SELL** — Model suggests significant overvaluation assuming base-case projections hold.
+
+**Sensitivity check:** For intrinsic = $20.00, would need either WACC ≈ 7.2% or terminal growth ≈ 5.5%, both unreasonable for this profile.

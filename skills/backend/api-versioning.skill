@@ -1,0 +1,66 @@
+---
+name: api-versioning
+version: 2.0.0
+domain: backend
+description: Choose API versioning strategy, compatibility policy, and deprecation mechanics for public and internal APIs.
+tags: [backend, api, versioning, compatibility, contracts]
+---
+
+## Purpose
+Define how APIs evolve without breaking consumers or freezing delivery.
+
+## When to Use
+Use when introducing a public API, changing response contracts, or coordinating versioned clients across web and mobile.
+
+## Input Format
+```yaml
+api:
+  audience: "public" | "partner" | "internal"
+  protocol: "rest" | "graphql" | "grpc" | "events"
+  current_version: string
+changes:
+  breaking: string[]
+  additive: string[]
+clients:
+  release_cadence: "fast" | "mixed" | "slow"
+```
+
+## Output Format
+```yaml
+versioning_strategy:
+  scheme: string
+  compatibility_policy: string
+  rationale: string
+rollout:
+  support_window: string
+  deprecation_steps: string[]
+governance:
+  contract_tests: string[]
+  communication: string[]
+```
+
+## Execution Logic
+1. Determine whether the audience can upgrade quickly.
+2. IF clients are slow-moving or third-party, minimize breaking changes and use explicit major version boundaries.
+3. IF changes are additive, keep the current version and preserve compatibility.
+4. Choose URI, header, schema, or event-version strategy based on protocol and operational simplicity.
+5. Define contract testing and deprecation signals before approving the change.
+
+## Rules
+1. Additive changes should not force a new version.
+2. Every breaking change needs a migration guide and sunset date.
+3. Keep at least one supported prior version for mobile and partner ecosystems unless cost is prohibitive.
+4. Version events independently from REST endpoints.
+5. Track consumer adoption before removing old versions.
+
+## Constraints
+- Never version for cosmetic changes.
+- Never introduce multiple concurrent versioning schemes for the same interface.
+- Never deprecate without telemetry on active consumers.
+
+## Examples
+Input: public REST API needs a breaking rename for invoice status.
+Output: `/v2` endpoint, six-month overlap, contract tests, and consumer migration checklist.
+
+## Output Style
+Return a short compatibility memo with scheme, rollout, and deprecation policy.

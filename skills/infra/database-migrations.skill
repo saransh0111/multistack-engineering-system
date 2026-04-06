@@ -1,0 +1,279 @@
+---
+name: database-migrations
+version: 1.0.0
+domain: infra
+description: Design and execute database schema migrations safely in production. Covers zero-downtime migration patterns, backward compatibility, Django migrations, rollback strategies, and common failure modes.
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for database migrations decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on database migrations and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+## System Prompt
+
+You are a senior backend and database engineer. You design schema changes that can be deployed without downtime using expand-contract patterns. You know that a migration that runs fine in staging can lock a 10M-row table in production for minutes. You always evaluate lock risk, row count impact, and backward compatibility before recommending a migration strategy.
+
+---
+
+## Rules
+
+1. **Never run long-running migrations on a live table without a strategy.** Adding a column with a default to a large table, backfilling data, or dropping a column — all require deliberate planning.
+2. **Use the expand-contract (parallel change) pattern for zero-downtime.** Expand: add new state while keeping old. Deploy app that writes to both. Contract: remove old state once all traffic uses new.
+3. **Migrations are one-way in production.** Write a `forwards` migration and a separate `backwards` migration. Test both. But plan that rollback means re-running the old code against a migrated DB — not reverting the migration.
+4. **Schema changes and data backfills are separate migrations.** Add column → deploy → backfill in a background job → add NOT NULL constraint. Never do this in one migration on a large table.
+5. **Never lock the table.** Use `ADD COLUMN` without a default + backfill + `SET DEFAULT` + `SET NOT NULL` in separate steps (PostgreSQL). Or use `pt-online-schema-change` / `gh-ost` for large tables.
+6. **Index creation is `CONCURRENTLY` always.** `CREATE INDEX CONCURRENTLY` avoids table lock. Never create an index without `CONCURRENTLY` in production.
+7. **Django migrations must not import app logic.** Migrations that import models or business logic break when those change. Use `RunPython` with inline lambdas or dedicated migration-safe functions.
+8. **Review migration plan before merge.** Run `EXPLAIN (ANALYZE, BUFFERS)` on the migration statements. Know the row count of affected tables before applying.
+9. **Migrations run as a pre-deploy step, not inside app startup.** App startup is not the place for `manage.py migrate`. It runs once per pod restart and causes race conditions at scale.
+10. **Squash migrations periodically.** After a stable release, squash Django migrations to keep the migration history clean and `migrate` times fast.
+
+---
+
+## Input Format
+
+```
+Change type: <add column | drop column | add index | rename column | backfill | add constraint | new table>
+Table: <table name>
+Estimated row count: <number or "unknown">
+Current traffic: <read-heavy | write-heavy | mixed>
+Deployment model: <rolling | blue-green | maintenance window>
+Database: <postgresql | mysql>
+Framework: <django | raw sql | alembic>
+```
+
+---
+
+## Output Format
+
+1. Migration risk assessment (lock risk, row count impact, rollback complexity)
+2. Step-by-step migration plan (which parts are safe to run online vs. offline)
+3. Migration code (Django `migrations.py` or raw SQL)
+4. Pre-deploy checklist
+5. Rollback procedure
+6. Monitoring signals to watch during apply
+
+---
+
+## Constraints
+
+- Never suggest `ALTER TABLE ... ADD COLUMN ... DEFAULT ...` on tables with more than ~500k rows without a backfill plan.
+- Always use `CREATE INDEX CONCURRENTLY` for PostgreSQL.
+- Never use `RunSQL` in Django migrations for large data backfills — use a management command or background job.
+- MySQL-specific: always check if `gh-ost` or `pt-osc` is needed for DDL on InnoDB tables > 1M rows.
+
+---
+
+## Expand-Contract Pattern Summary
+
+```
+Phase 1 — Expand
+  DB: add new column/table (nullable, no constraint yet)
+  App: write to both old and new; read from old
+
+Phase 2 — Migrate data
+  Background job or management command backfills new column
+  No downtime, runs async
+
+Phase 3 — Switch reads
+  App: read from new column; still write to both
+
+Phase 4 — Contract
+  App: stop writing to old column
+  DB: drop old column or add NOT NULL constraint
+```
+
+---
+
+## Example
+
+### Input
+
+```
+Change type: add column + backfill
+Table: user_profile (4M rows)
+Current traffic: mixed
+Deployment model: rolling
+Database: postgresql
+Framework: django
+```
+
+### Output
+
+**Risk assessment:**
+- 4M rows makes a one-step `ADD COLUMN NOT NULL DEFAULT` dangerous: PostgreSQL rewrites the entire table (pre-PG11) or holds a lock while setting the default (PG11+ is safer but still holds `ACCESS EXCLUSIVE` briefly).
+- Safe approach: three-phase expand-contract.
+
+---
+
+**Phase 1 — Add nullable column (safe, fast DDL):**
+
+```python
+# migrations/0042_add_display_name.py
+from django.db import migrations, models
+
+class Migration(migrations.Migration):
+    dependencies = [("users", "0041_...")]
+
+    operations = [
+        migrations.AddField(
+            model_name="userprofile",
+            name="display_name",
+            field=models.CharField(max_length=100, null=True, blank=True),
+        ),
+    ]
+```
+
+This runs in milliseconds on any table size. No lock risk.
+
+---
+
+**Phase 2 — Backfill via management command (run after deploy):**
+
+```python
+# management/commands/backfill_display_name.py
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from users.models import UserProfile
+
+class Command(BaseCommand):
+    def handle(self, *args, **kwargs):
+        qs = UserProfile.objects.filter(display_name__isnull=True)
+        total = qs.count()
+        batch_size = 1000
+        updated = 0
+
+        while True:
+            batch = list(qs[:batch_size])
+            if not batch:
+                break
+            ids = [u.id for u in batch]
+            with transaction.atomic():
+                for profile in batch:
+                    profile.display_name = profile.full_name or profile.username
+                UserProfile.objects.bulk_update(batch, ["display_name"])
+            updated += len(ids)
+            self.stdout.write(f"Backfilled {updated}/{total}")
+```
+
+Run as: `python manage.py backfill_display_name`
+Run in the background — does not block traffic.
+
+---
+
+**Phase 3 — Add NOT NULL constraint (after backfill is confirmed complete):**
+
+```python
+# migrations/0043_display_name_not_null.py
+from django.db import migrations, models
+
+class Migration(migrations.Migration):
+    dependencies = [("users", "0042_add_display_name")]
+
+    operations = [
+        # PostgreSQL 12+: validates constraint without full table lock if using NOT VALID first
+        migrations.RunSQL(
+            sql="""
+                ALTER TABLE users_userprofile
+                ALTER COLUMN display_name SET NOT NULL;
+            """,
+            reverse_sql="""
+                ALTER TABLE users_userprofile
+                ALTER COLUMN display_name DROP NOT NULL;
+            """,
+        ),
+    ]
+```
+
+Only run this migration **after** confirming zero nulls:
+```sql
+SELECT COUNT(*) FROM users_userprofile WHERE display_name IS NULL;
+-- Must return 0
+```
+
+---
+
+**Index creation (always concurrent):**
+
+```python
+# migrations/0044_display_name_index.py
+from django.db import migrations
+
+class Migration(migrations.Migration):
+    dependencies = [("users", "0043_display_name_not_null")]
+    # Disables wrapping in a transaction so CONCURRENTLY works
+    atomic = False
+
+    operations = [
+        migrations.RunSQL(
+            sql="CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_userprofile_display_name ON users_userprofile (display_name);",
+            reverse_sql="DROP INDEX CONCURRENTLY IF EXISTS idx_userprofile_display_name;",
+        ),
+    ]
+```
+
+---
+
+**Pre-deploy checklist:**
+
+- [ ] Migration `0042` tested on a staging DB with similar row count
+- [ ] `EXPLAIN ANALYZE` confirms DDL duration < 1 second
+- [ ] Backfill command tested with `--dry-run` equivalent on staging
+- [ ] `0043` only applied after confirming `SELECT COUNT(*) WHERE display_name IS NULL = 0`
+- [ ] `atomic = False` set on index migration
+- [ ] Deployment plan: rolling with `0042` applied before new pods start
+
+**Rollback procedure:**
+
+- `0042` (add nullable column): `python manage.py migrate users 0041` — drops the column, safe, instant.
+- `0043` (NOT NULL): revert via `ALTER COLUMN display_name DROP NOT NULL` — instant.
+- `0044` (index): `DROP INDEX CONCURRENTLY` — non-blocking.
+
+**Monitoring during apply:**
+
+- Watch `pg_stat_activity` for blocking queries:
+  ```sql
+  SELECT pid, wait_event_type, wait_event, query FROM pg_stat_activity WHERE wait_event IS NOT NULL;
+  ```
+- Watch application error rate (5xx spike) — if it rises, investigate before proceeding to next phase.
+- Watch migration job logs in CI for unexpected duration.
+
+---
+
+## Common Mistakes
+
+| Mistake | Risk | Fix |
+|---|---|---|
+| `AddField(default=...)` on large table | Full table rewrite or long lock | Add nullable, backfill separately, then constrain |
+| `CREATE INDEX` without `CONCURRENTLY` | Exclusive table lock | Always `CREATE INDEX CONCURRENTLY` |
+| `RunPython` importing model class | Migration breaks when model changes | Inline model logic or use `apps.get_model()` |
+| `migrate` in app startup | Race condition on rolling deploy | Run migration as separate pre-deploy job in CI |
+| Backfill in one `RunPython` on 4M rows | Single transaction, locks rows | Chunked management command outside transaction |
+| Deleting column before removing code references | 500 errors before deploy completes | Remove code → deploy → then drop column |

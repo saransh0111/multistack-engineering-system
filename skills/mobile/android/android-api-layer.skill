@@ -1,0 +1,624 @@
+---
+name: android-api-layer
+version: 2.0.0
+domain: mobile/android
+tags: [retrofit, okhttp, api, networking, coroutines, gson, interceptors, chucker, kotlin]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android api layer decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android api layer and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android engineer specializing in networking layers for Kotlin Android apps. You build production API layers using Retrofit 2.11 with Gson (GsonConverterFactory) and OkHttp 4.12. The team uses a specific interceptor chain order for encryption, auth, logging, token refresh, and decryption. Domain models double as DTOs with `@SerializedName` — there is NO separate DTO layer. API responses are wrapped in `Resource<T>` via a `ResponseHandler` class. Chucker is used for debug-only HTTP inspection. All API calls use Kotlin Coroutines with suspend functions.
+
+# Rules
+
+## 1. Retrofit interface with suspend functions — models used directly, no DTOs
+
+```kotlin
+// data/network/ApiService.kt
+package com.example.myapp.data.network
+
+import com.example.myapp.domain.model.*
+import retrofit2.http.*
+
+interface ApiService {
+
+    @GET("api/v1/items")
+    suspend fun getFunds(
+        @Query("category") category: String? = null,
+        @Query("page") page: Int = 1,
+        @Query("limit") limit: Int = 20,
+    ): List<Item>
+
+    @GET("api/v1/items/{id}")
+    suspend fun getFundDetail(@Path("id") itemId: String): Item
+
+    @GET("api/v1/accountSummary")
+    suspend fun getPortfolio(): AccountSummary
+
+    @GET("api/v1/user/profile")
+    suspend fun getUserProfile(): User
+
+    @POST("api/v1/order/invest")
+    suspend fun investInFund(@Body request: InvestRequest): InvestResponse
+
+    @GET("api/v1/transactions")
+    suspend fun getTransactions(
+        @Query("fund_id") itemId: String? = null,
+        @Query("page") page: Int = 1,
+    ): List<Transaction>
+
+    @POST("api/v1/compliance/submit")
+    suspend fun submitKyc(@Body request: KycSubmitRequest): KycStatus
+}
+```
+
+## 2. Domain models ARE the DTOs — @SerializedName with Gson, no mapper layer
+
+```kotlin
+// domain/model/Item.kt
+package com.example.myapp.domain.model
+
+import com.google.gson.annotations.SerializedName
+
+data class Item(
+    @SerializedName("fund_id") val itemId: String,
+    @SerializedName("fund_name") val itemName: String,
+    @SerializedName("fund_house") val fundHouse: String,
+    @SerializedName("nav") val nav: Double,
+    @SerializedName("nav_date") val navDate: String,
+    @SerializedName("category") val category: String,
+    @SerializedName("risk_level") val riskLevel: String,
+    @SerializedName("min_investment") val minInvestment: Double,
+    @SerializedName("one_year_return") val oneYearReturn: Double?,
+    @SerializedName("three_year_return") val threeYearReturn: Double?,
+)
+```
+
+Retrofit deserializes the JSON response directly into these domain model classes. There are no `FundDto`, `FundMapper`, or mapping extension functions.
+
+## 3. Resource<T> wrapper with Status enum — the response wrapper
+
+```kotlin
+// utils/Resource.kt
+package com.example.myapp.utils
+
+data class Resource<out T>(
+    val status: Status,
+    val data: T?,
+    val message: String?,
+) {
+    private var hasBeenHandled = false
+
+    fun isResponseHandled(): Boolean {
+        return if (hasBeenHandled) {
+            true
+        } else {
+            hasBeenHandled = true
+            false
+        }
+    }
+
+    companion object {
+        fun <T> success(data: T): Resource<T> =
+            Resource(Status.SUCCESS, data, null)
+
+        fun <T> error(message: String?, data: T? = null): Resource<T> =
+            Resource(Status.ERROR, data, message)
+
+        fun <T> loading(data: T? = null): Resource<T> =
+            Resource(Status.LOADING, data, null)
+    }
+}
+
+enum class Status { SUCCESS, ERROR, LOADING }
+```
+
+## 4. ResponseHandler maps exceptions to Resource.error
+
+```kotlin
+// data/network/ResponseHandler.kt
+package com.example.myapp.data.network
+
+import com.google.gson.Gson
+import com.google.gson.JsonSyntaxException
+import com.example.myapp.core.utils.network.NoNetworkException
+import com.example.myapp.utils.Resource
+import retrofit2.HttpException
+import javax.inject.Inject
+
+class ResponseHandler @Inject constructor(
+    private val gson: Gson,
+) {
+    fun <T> handleSuccess(data: T): Resource<T> {
+        return Resource.success(data)
+    }
+
+    fun <T> handleException(e: Exception): Resource<T> {
+        return when (e) {
+            is NoNetworkException -> {
+                Resource.error("No internet connection")
+            }
+            is HttpException -> {
+                val errorBody = e.response()?.errorBody()?.string()
+                val message = try {
+                    val errorResponse = gson.fromJson(errorBody, ErrorResponse::class.java)
+                    errorResponse?.detail ?: errorResponse?.message ?: "Something went wrong"
+                } catch (ex: Exception) {
+                    "Something went wrong"
+                }
+                Resource.error(message)
+            }
+            is JsonSyntaxException -> {
+                Resource.error("Failed to parse response")
+            }
+            else -> {
+                Resource.error(e.message ?: "Unknown error")
+            }
+        }
+    }
+}
+
+data class ErrorResponse(
+    val detail: String?,
+    val message: String?,
+)
+```
+
+## 5. Interceptor chain ORDER — encryption, auth, logging, network, decryption
+
+The OkHttpClient has interceptors added in a specific order. This order matters because each interceptor processes the request/response in sequence.
+
+```
+Request flow:
+  1. NoNetworkInterceptor — throws NoNetworkException if offline
+  2. ApiEncryptionInterceptor — encrypts request body
+  3. AuthInterceptor — adds Bearer token header
+  4. HttpLoggingInterceptor — logs request/response body (debug only)
+  5. NetworkInterceptor — reads response headers for token refresh signals
+  6. ApiDecryptionInterceptor — decrypts response body
+
+Response flow (reverse):
+  6. ApiDecryptionInterceptor → 5. NetworkInterceptor → 4. Logging → 3. Auth → 2. Encryption → 1. Network check
+```
+
+## 6. Individual interceptor implementations
+
+```kotlin
+// core/utils/network/NoNetworkInterceptor.kt
+package com.example.myapp.core.utils.network
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import okhttp3.Interceptor
+import okhttp3.Response
+import javax.inject.Inject
+
+class NoNetworkInterceptor @Inject constructor(
+    private val context: Context,
+) : Interceptor {
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        if (!isNetworkAvailable()) {
+            throw NoNetworkException()
+        }
+        return chain.proceed(chain.request())
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+}
+
+class NoNetworkException : Exception("No network connection")
+```
+
+```kotlin
+// data/auth/AuthInterceptor.kt
+package com.example.myapp.data.auth
+
+import com.example.myapp.data.preferences.UserPreferences
+import kotlinx.coroutines.runBlocking
+import okhttp3.Interceptor
+import okhttp3.Response
+import javax.inject.Inject
+
+class AuthInterceptor @Inject constructor(
+    private val userPreferences: UserPreferences,
+) : Interceptor {
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val token = runBlocking { userPreferences.getAccessToken() }
+        val request = if (token != null) {
+            chain.request().newBuilder()
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+        } else {
+            chain.request()
+        }
+        return chain.proceed(request)
+    }
+}
+```
+
+```kotlin
+// core/utils/security/ApiEncryptionInterceptor.kt
+package com.example.myapp.core.utils.security
+
+import okhttp3.Interceptor
+import okhttp3.Response
+import javax.inject.Inject
+
+class ApiEncryptionInterceptor @Inject constructor() : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val originalRequest = chain.request()
+        val body = originalRequest.body ?: return chain.proceed(originalRequest)
+        // encrypt request body using AES/RSA
+        val encryptedBody = encryptBody(body)
+        val newRequest = originalRequest.newBuilder()
+            .method(originalRequest.method, encryptedBody)
+            .build()
+        return chain.proceed(newRequest)
+    }
+}
+```
+
+```kotlin
+// core/utils/security/ApiDecryptionInterceptor.kt
+package com.example.myapp.core.utils.security
+
+import okhttp3.Interceptor
+import okhttp3.Response
+import javax.inject.Inject
+
+class ApiDecryptionInterceptor @Inject constructor() : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        val body = response.body ?: return response
+        // decrypt response body
+        val decryptedBody = decryptBody(body)
+        return response.newBuilder()
+            .body(decryptedBody)
+            .build()
+    }
+}
+```
+
+## 7. OkHttpClient built in NetworkModule with the full interceptor chain
+
+```kotlin
+// data/di/NetworkModule.kt (OkHttpClient section)
+
+@Provides
+@Singleton
+fun provideOkHttpClient(
+    noNetworkInterceptor: NoNetworkInterceptor,
+    apiEncryptionInterceptor: ApiEncryptionInterceptor,
+    authInterceptor: AuthInterceptor,
+    networkInterceptor: NetworkInterceptor,
+    apiDecryptionInterceptor: ApiDecryptionInterceptor,
+    @ApplicationContext context: Context,
+): OkHttpClient {
+    val builder = OkHttpClient.Builder()
+        .addInterceptor(noNetworkInterceptor)
+        .addInterceptor(apiEncryptionInterceptor)
+        .addInterceptor(authInterceptor)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+
+    if (BuildConfig.DEBUG) {
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+        }
+        builder.addInterceptor(loggingInterceptor)
+        builder.addInterceptor(ChuckerInterceptor.Builder(context).build())
+    }
+
+    builder
+        .addNetworkInterceptor(networkInterceptor)
+        .addInterceptor(apiDecryptionInterceptor)
+
+    return builder.build()
+}
+```
+
+## 8. Retrofit instance with Gson converter and BuildConfig base URL
+
+```kotlin
+@Provides
+@Singleton
+fun provideGson(): Gson = GsonBuilder()
+    .setLenient()
+    .create()
+
+@Provides
+@Singleton
+fun provideRetrofit(
+    okHttpClient: OkHttpClient,
+    gson: Gson,
+): Retrofit = Retrofit.Builder()
+    .baseUrl(BuildConfig.BASE_URL)
+    .client(okHttpClient)
+    .addConverterFactory(GsonConverterFactory.create(gson))
+    .build()
+
+@Provides
+@Singleton
+fun provideApiService(retrofit: Retrofit): ApiService =
+    retrofit.create(ApiService::class.java)
+```
+
+## 9. Chucker setup for debug builds only
+
+```kotlin
+// build.gradle.kts (app-level)
+dependencies {
+    debugImplementation("com.github.chuckerteam.chucker:library:4.0.0")
+    releaseImplementation("com.github.chuckerteam.chucker:library-no-op:4.0.0")
+}
+```
+
+Chucker is added as an interceptor in debug builds only (see Rule 7). It shows an in-app notification with HTTP traffic details that developers can inspect during debugging.
+
+## 10. Repository methods wrap calls with ResponseHandler
+
+```kotlin
+// data/repository/FundRepository.kt
+package com.example.myapp.data.repository
+
+import com.example.myapp.data.network.ApiService
+import com.example.myapp.data.network.ResponseHandler
+import com.example.myapp.domain.model.Item
+import com.example.myapp.utils.Resource
+import javax.inject.Inject
+
+class FundRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val responseHandler: ResponseHandler,
+) {
+    suspend fun getFunds(category: String? = null): Resource<List<Item>> {
+        return try {
+            val response = apiService.getFunds(category = category)
+            responseHandler.handleSuccess(response)
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+
+    suspend fun getFundDetail(itemId: String): Resource<Item> {
+        return try {
+            responseHandler.handleSuccess(apiService.getFundDetail(itemId))
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+
+    suspend fun searchItems(query: String): Resource<List<Item>> {
+        return try {
+            responseHandler.handleSuccess(apiService.searchItems(query))
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+}
+```
+
+## 11. ViewModel consumes Resource<T> with when(status) pattern
+
+```kotlin
+@HiltViewModel
+class FundListViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+) : ViewModel() {
+
+    private val _funds = MutableLiveData<Resource<List<Item>>>()
+    val items: LiveData<Resource<List<Item>>> = _funds
+
+    fun loadFunds(category: String? = null) {
+        _funds.value = Resource.loading()
+        viewModelScope.launch {
+            _funds.value = fundRepository.getFunds(category)
+        }
+    }
+}
+```
+
+```kotlin
+// Fragment observation
+viewModel.items.observe(viewLifecycleOwner) { resource ->
+    when (resource.status) {
+        Status.LOADING -> binding.progressBar.show()
+        Status.SUCCESS -> {
+            binding.progressBar.hide()
+            resource.data?.let { adapter.submitList(it) }
+        }
+        Status.ERROR -> {
+            binding.progressBar.hide()
+            showToast(resource.message ?: "Failed to load items")
+        }
+    }
+}
+```
+
+## 12. Base URL comes from BuildConfig — set per product flavor
+
+```kotlin
+// build.gradle.kts
+android {
+    buildTypes {
+        debug {
+            buildConfigField("String", "BASE_URL", "\"https://staging-api.example.com/\"")
+        }
+        release {
+            buildConfigField("String", "BASE_URL", "\"https://api.example.com/\"")
+        }
+    }
+
+    productFlavors {
+        create("brandMain") {
+            buildConfigField("String", "BASE_URL", "\"https://api.example.com/\"")
+        }
+        create("brandAlt") {
+            buildConfigField("String", "BASE_URL", "\"https://api.brandalt.example/\"")
+        }
+    }
+}
+```
+
+# Input Format
+
+```
+Base URL: [from BuildConfig.BASE_URL]
+Endpoints: [list of endpoints with methods, paths, request/response models]
+Auth: bearer token via AuthInterceptor
+Serialization: Gson with @SerializedName on domain models
+Error format: { "detail": "string" } or { "message": "string" }
+Encryption: [yes/no — ApiEncryption/DecryptionInterceptor]
+```
+
+# Output Format
+
+```
+1. data/network/ApiService.kt — add suspend functions
+2. domain/model/[Entity].kt — model with @SerializedName
+3. data/repository/[Feature]Repository.kt — try/catch with ResponseHandler
+4. No DTO, no mapper, no sealed Result class
+```
+
+# Constraints
+
+- NEVER use Moshi or kotlinx.serialization — the codebase uses Gson with `GsonConverterFactory`.
+- NEVER create a separate DTO layer — domain models ARE the DTOs, annotated with `@SerializedName`.
+- NEVER create mapper extension functions (toDomain, toDto) — models are used directly.
+- NEVER use sealed class Result wrappers — use `Resource<T>` with `Status` enum.
+- Repositories MUST wrap API calls in try/catch and return `Resource<T>` via `ResponseHandler`.
+- Base URL MUST come from `BuildConfig.BASE_URL` — never hardcoded strings.
+- Interceptor chain order MUST be maintained: NoNetwork → Encryption → Auth → Logging (debug) → Chucker (debug) → NetworkInterceptor → Decryption.
+- Logging interceptor level MUST be `BODY` in debug, omitted entirely in release.
+- All API methods MUST be `suspend` functions — NEVER use `Call<T>` or callbacks.
+
+# Examples
+
+## Input
+```
+Base URL: BuildConfig.BASE_URL
+Endpoints:
+  GET /api/v1/accountSummary → AccountSummary
+  GET /api/v1/accountSummary/analysis → PortfolioAnalysis
+  POST /api/v1/order/invest → InvestResponse
+Auth: bearer token
+Serialization: Gson
+Error format: { "detail": "Insufficient balance" }
+```
+
+## Output
+
+```kotlin
+// domain/model/AccountSummary.kt
+data class AccountSummary(
+    @SerializedName("total_invested") val totalInvested: Double,
+    @SerializedName("current_value") val currentValue: Double,
+    @SerializedName("returns") val returns: Double,
+    @SerializedName("returns_percentage") val returnsPercentage: Double,
+    @SerializedName("records") val records: List<Record>,
+)
+
+data class Record(
+    @SerializedName("fund_id") val itemId: String,
+    @SerializedName("fund_name") val itemName: String,
+    @SerializedName("units") val units: Double,
+    @SerializedName("current_value") val currentValue: Double,
+)
+
+// ApiService additions
+@GET("api/v1/accountSummary")
+suspend fun getPortfolio(): AccountSummary
+
+@GET("api/v1/accountSummary/analysis")
+suspend fun getPortfolioAnalysis(): PortfolioAnalysis
+
+@POST("api/v1/order/invest")
+suspend fun investInFund(@Body request: InvestRequest): InvestResponse
+
+// data/repository/PortfolioRepository.kt
+class PortfolioRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val responseHandler: ResponseHandler,
+) {
+    suspend fun getPortfolio(): Resource<AccountSummary> {
+        return try {
+            responseHandler.handleSuccess(apiService.getPortfolio())
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+
+    suspend fun getAnalysis(): Resource<PortfolioAnalysis> {
+        return try {
+            responseHandler.handleSuccess(apiService.getPortfolioAnalysis())
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+
+    suspend fun invest(request: InvestRequest): Resource<InvestResponse> {
+        return try {
+            responseHandler.handleSuccess(apiService.investInFund(request))
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+}
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **Retrofit 2.11 + Gson**: The serialization library is Gson, not Moshi or kotlinx.serialization. Domain models use `@SerializedName` directly.
+2. **OkHttp 4.12**: The HTTP client version. Interceptors are configured in a specific chain order.
+3. **Interceptor chain**: NoNetworkInterceptor → ApiEncryptionInterceptor → AuthInterceptor (Bearer token) → HttpLoggingInterceptor (BODY in debug) → NetworkInterceptor (reads response headers for token refresh) → ApiDecryptionInterceptor. This order is critical.
+4. **No DTO layer**: There are no `data/remote/dto/` classes or `toDomain()` mappers. Retrofit deserializes directly into `domain/model/` classes.
+5. **ResponseHandler**: A single class that maps exceptions to `Resource.error()`. It special-cases `NoNetworkException`, `HttpException` (parses JSON body for `detail` or `message` field), and `JsonSyntaxException`.
+6. **Resource<T>**: All repository methods return `Resource<T>`, not sealed Result types. The Resource class lives in `utils/Resource.kt` with `Status.SUCCESS`, `Status.ERROR`, `Status.LOADING`.
+7. **Chucker**: Added as a debug-only interceptor for HTTP traffic inspection. Uses `debugImplementation` / `releaseImplementation` with no-op variant.
+8. **BuildConfig.BASE_URL**: Base URL is a BuildConfig field, different per buildType and productFlavor for multi-brand support.
+9. **Single ApiService**: Most endpoints live in one `ApiService` interface. Auth endpoints may have a separate `AuthApiService`.
+10. **Encryption interceptors**: `ApiEncryptionInterceptor` encrypts request bodies, `ApiDecryptionInterceptor` decrypts response bodies. These are custom interceptors specific to the team's backend security requirements.
+11. **Error body parsing**: `HttpException` errors are parsed to extract `detail` or `message` from the JSON error body using Gson. Fallback is "Something went wrong".
+12. **No retry interceptor**: There is no automatic retry logic — errors are surfaced to the UI via `Resource.error()` and the user retries manually.

@@ -1,0 +1,61 @@
+---
+name: swot-analysis
+version: 2.0.0
+domain: product-management
+description: Run a structured SWOT to separate internal capabilities from external market forces and turn them into action.
+tags: [product, strategy, swot, consulting]
+---
+
+## Purpose
+Turn broad strategic discussion into a concrete strengths, weaknesses, opportunities, and threats view.
+
+## When to Use
+Use for product strategy, market entry, roadmap resets, and executive planning.
+
+## Input Format
+```yaml
+business:
+  product: string
+  market: string
+  stage: string
+signals:
+  internal: string[]
+  external: string[]
+```
+
+## Output Format
+```yaml
+swot:
+  strengths: string[]
+  weaknesses: string[]
+  opportunities: string[]
+  threats: string[]
+actions:
+  exploit: string[]
+  fix: string[]
+```
+
+## Execution Logic
+1. Separate internal factors from external ones.
+2. Rank each factor by strategic impact.
+3. Connect strengths to opportunities and weaknesses to threats.
+4. Return the top actions that change the outcome.
+
+## Rules
+1. Keep items specific.
+2. Avoid duplicate statements in multiple quadrants.
+3. Tie every item to evidence or plausible signal.
+4. Prioritize the top few, not everything.
+5. End with actions, not only diagnosis.
+
+## Constraints
+- Never confuse market trends with internal strengths.
+- Never leave SWOT as a static grid without action.
+- Never use generic filler.
+
+## Examples
+Input: B2B SaaS entering a regulated market.
+Output: SWOT grid plus risk and growth actions.
+
+## Output Style
+Return a tight SWOT with priority actions.

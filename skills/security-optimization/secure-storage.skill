@@ -1,0 +1,62 @@
+---
+name: secure-storage
+version: 2.0.0
+domain: security-optimization
+description: Choose storage controls for secrets, PII, financial records, and mobile data at rest with encryption and lifecycle policy.
+tags: [security, storage, encryption, pii, mobile]
+---
+
+## Purpose
+Protect sensitive data at rest across databases, object stores, caches, and client devices.
+
+## When to Use
+Use when storing credentials, tokens, PII, regulated records, or offline mobile data.
+
+## Input Format
+```yaml
+data:
+  classes: string[]
+  stores: string[]
+  retention_requirements: string[]
+requirements:
+  offline_client_storage: boolean
+  key_rotation: boolean
+  compliance: "standard" | "regulated"
+```
+
+## Output Format
+```yaml
+storage_policy:
+  encryption_model: string[]
+  key_management: string
+  access_controls: string[]
+  retention_and_deletion: string[]
+client_controls:
+  mobile_or_browser: string[]
+```
+
+## Execution Logic
+1. Classify data by sensitivity and residency.
+2. IF data is highly sensitive, minimize collection before choosing controls.
+3. Select encryption, key custody, and access paths per store.
+4. Define retention, deletion, backup, and restore handling.
+5. Add device-specific controls for mobile secure enclave, keychain, or encrypted storage.
+
+## Rules
+1. Encrypt sensitive data at rest and in backups.
+2. Separate key management from data storage where feasible.
+3. Apply least privilege to read paths and admin operations.
+4. Tokenize or hash when raw value storage is unnecessary.
+5. Test restore paths without weakening encryption posture.
+
+## Constraints
+- Never store secrets in plaintext on client devices.
+- Never keep sensitive data longer than business and legal needs require.
+- Never expose decryption keys in application logs or build artifacts.
+
+## Examples
+Input: financial app storing statements, refresh tokens, and offline mobile session data.
+Output: encrypted server storage, HSM-backed key policy, and platform-secure mobile storage.
+
+## Output Style
+Return a data-at-rest policy with storage class, keys, and lifecycle controls.

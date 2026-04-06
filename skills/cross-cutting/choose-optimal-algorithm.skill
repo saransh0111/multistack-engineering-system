@@ -1,0 +1,67 @@
+---
+name: choose-optimal-algorithm
+version: 2.0.0
+domain: cross-cutting
+description: Select the best algorithm or data structure for real workloads using complexity, memory, contention, and implementation risk.
+tags: [algorithms, data-structures, optimization, decision]
+---
+
+## Purpose
+Choose algorithms based on actual constraints instead of textbook asymptotics alone.
+
+## When to Use
+Use when performance, memory, scale, or correctness depends on the underlying algorithm or data structure choice.
+
+## Input Format
+```yaml
+problem:
+  operation: string
+  input_size: string
+  read_write_ratio: string
+  latency_target_ms: number
+constraints:
+  memory_limit_mb: number
+  concurrency_level: string
+  implementation_risk: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+recommendation:
+  algorithm: string
+  data_structure: string
+  rationale: string
+tradeoffs:
+  time_complexity: string
+  space_complexity: string
+  failure_modes: string[]
+alternatives:
+  - option: string
+    when_better: string
+```
+
+## Execution Logic
+1. Identify dominant operations and their frequency.
+2. Eliminate options that miss latency or memory constraints.
+3. IF workload is small or code clarity dominates, choose the simplest sufficient approach.
+4. IF concurrency or skew changes the real cost profile, include contention and cache behavior.
+5. Return the chosen algorithm with a rejection reason for credible alternatives.
+
+## Rules
+1. Optimize for the hot path, not edge-path aesthetics.
+2. Include constant-factor and implementation complexity tradeoffs.
+3. State when precomputation or indexing changes the answer.
+4. Prefer deterministic behavior in critical paths.
+5. Mention benchmarking needs if the answer depends on workload shape.
+
+## Constraints
+- Never recommend an advanced algorithm without a real bottleneck.
+- Never present Big O as the only decision factor.
+- Never ignore data distribution.
+
+## Examples
+Input: top-k ranking with frequent updates and low-latency reads.
+Output: heap plus indexed map with explanation versus full sort and balanced tree.
+
+## Output Style
+Return a compact decision note with complexity, tradeoffs, and alternatives.

@@ -1,0 +1,61 @@
+---
+name: mvp-definition
+version: 2.0.0
+domain: product-management
+description: Define the minimum viable product that proves core value with the smallest buildable scope.
+tags: [product, mvp, scope, strategy]
+---
+
+## Purpose
+Cut a product idea down to the smallest version that can test core value.
+
+## When to Use
+Use after the opportunity is credible but before the roadmap expands.
+
+## Input Format
+```yaml
+idea:
+  target_user: string
+  core_problem: string
+  desired_outcome: string
+constraints:
+  timeline: string
+  budget: string
+  must_not_fail: string[]
+```
+
+## Output Format
+```yaml
+mvp:
+  must_have: string[]
+  exclude_now: string[]
+  success_signal: string[]
+launch_plan:
+  audience: string
+  validation_window: string
+```
+
+## Execution Logic
+1. Identify the smallest flow that proves user value.
+2. Strip features that do not change the core learning loop.
+3. Protect the trust-critical parts even if the feature set is minimal.
+4. Return must-have scope, exclusions, and success signals.
+
+## Rules
+1. MVP is minimal, not sloppy.
+2. One core user and one primary job-to-be-done first.
+3. Trust, reliability, and security do not become optional.
+4. Exclusions are as important as inclusions.
+5. Define what would invalidate the MVP.
+
+## Constraints
+- Never turn MVP into a full roadmap.
+- Never include prestige features that do not validate value.
+- Never omit success criteria.
+
+## Examples
+Input: B2B onboarding automation platform.
+Output: core workflow MVP with non-core analytics deferred.
+
+## Output Style
+Return a sharp MVP scope and what is explicitly out.

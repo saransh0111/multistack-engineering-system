@@ -1,0 +1,62 @@
+---
+name: resilience-patterns
+version: 2.0.0
+domain: security-optimization
+description: Select retries, circuit breakers, bulkheads, fallbacks, and graceful degradation patterns for resilient systems.
+tags: [resilience, retries, circuit-breaker, bulkhead, fallback]
+---
+
+## Purpose
+Choose the right resilience patterns for the actual failure modes and business priorities.
+
+## When to Use
+Use when services depend on networks, databases, third-party APIs, or asynchronous infrastructure that can fail or degrade.
+
+## Input Format
+```yaml
+dependency_graph:
+  critical_dependencies: string[]
+  known_failures: string[]
+requirements:
+  latency_sensitive: boolean
+  user_visible_outage_tolerance: "low" | "medium" | "high"
+  fallback_possible: boolean
+```
+
+## Output Format
+```yaml
+pattern_set:
+  retries: string
+  circuit_breaker: string
+  bulkhead: string
+  fallback: string
+operations:
+  alerts: string[]
+  runbook_steps: string[]
+```
+
+## Execution Logic
+1. Map dependencies to their failure behaviors: slow, flaky, unavailable, overloaded.
+2. IF failures are transient, use bounded retries with deadlines.
+3. IF overload propagation is a risk, add circuit breakers and bulkheads.
+4. IF partial service still provides value, define graceful degradation or fallback.
+5. Return pattern choices with operator response expectations.
+
+## Rules
+1. Retries must be bounded and jittered.
+2. Use deadlines, not open-ended waits.
+3. Bulkheads should align with resource pools that can saturate.
+4. Fallbacks must be truthful, not silently wrong.
+5. Measure fallback usage and breaker state changes.
+
+## Constraints
+- Never stack retries across every layer blindly.
+- Never use fallback that violates business correctness.
+- Never treat resilience patterns as a substitute for root-cause fixes.
+
+## Examples
+Input: checkout service depends on tax API and recommendations API.
+Output: strict path for tax with circuit breaker, degraded checkout if recommendations fail, and bounded retries.
+
+## Output Style
+Return a resilience pattern set with failure mapping and runbook notes.

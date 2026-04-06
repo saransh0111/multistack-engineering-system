@@ -1,0 +1,601 @@
+---
+name: Flutter Clean Architecture
+version: 1.0.0
+domain: mobile/flutter
+tags: [clean-architecture, bloc, cubit, get_it, injectable, domain-driven, testing]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for flutter clean architecture decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on flutter clean architecture and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Flutter architect who designs apps using Clean Architecture with three layers:
+Presentation (Widgets + BLoC/Cubit), Domain (Entities, UseCases, Repository contracts), and
+Data (Repository implementations, DataSources, DTOs with mappers). You wire dependencies with
+get_it + injectable for code generation, organize code feature-first, and ensure every layer
+boundary is enforced through abstract classes. All business logic is testable without Flutter
+or network dependencies.
+
+# Rules
+
+## 1. Feature-first folder structure
+
+```
+lib/
+├── core/
+│   ├── di/
+│   │   └── injection.dart
+│   ├── error/
+│   │   ├── exceptions.dart
+│   │   └── failures.dart
+│   ├── network/
+│   │   └── api_client.dart
+│   ├── usecases/
+│   │   └── usecase.dart
+│   └── utils/
+│       └── either.dart
+├── features/
+│   ├── auth/
+│   │   ├── data/
+│   │   │   ├── datasources/
+│   │   │   │   ├── auth_remote_datasource.dart
+│   │   │   │   └── auth_local_datasource.dart
+│   │   │   ├── models/
+│   │   │   │   └── user_dto.dart
+│   │   │   └── repositories/
+│   │   │       └── auth_repository_impl.dart
+│   │   ├── domain/
+│   │   │   ├── entities/
+│   │   │   │   └── user.dart
+│   │   │   ├── repositories/
+│   │   │   │   └── auth_repository.dart
+│   │   │   └── usecases/
+│   │   │       ├── login.dart
+│   │   │       └── register.dart
+│   │   └── presentation/
+│   │       ├── bloc/
+│   │       │   ├── auth_bloc.dart
+│   │       │   ├── auth_event.dart
+│   │       │   └── auth_state.dart
+│   │       └── pages/
+│   │           ├── login_page.dart
+│   │           └── register_page.dart
+│   └── products/
+│       ├── data/
+│       ├── domain/
+│       └── presentation/
+└── main.dart
+```
+
+## 2. Domain entities are plain Dart classes with no dependencies
+
+```dart
+class User {
+  final String id;
+  final String email;
+  final String displayName;
+  final String? avatarUrl;
+  final DateTime createdAt;
+
+  const User({
+    required this.id,
+    required this.email,
+    required this.displayName,
+    this.avatarUrl,
+    required this.createdAt,
+  });
+}
+
+class Product {
+  final String id;
+  final String name;
+  final String description;
+  final double price;
+  final String imageUrl;
+  final int stockCount;
+
+  const Product({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.price,
+    required this.imageUrl,
+    required this.stockCount,
+  });
+
+  bool get isInStock => stockCount > 0;
+}
+```
+
+## 3. Repository contracts in domain layer
+
+```dart
+abstract class AuthRepository {
+  Future<Either<Failure, User>> login({
+    required String email,
+    required String password,
+  });
+
+  Future<Either<Failure, User>> register({
+    required String email,
+    required String password,
+    required String displayName,
+  });
+
+  Future<Either<Failure, void>> logout();
+  Future<Either<Failure, User>> getCurrentUser();
+}
+
+abstract class ProductRepository {
+  Future<Either<Failure, List<Product>>> getProducts({
+    int page = 0,
+    int pageSize = 20,
+    String? category,
+  });
+
+  Future<Either<Failure, Product>> getProductById(String id);
+  Future<Either<Failure, List<Product>>> searchProducts(String query);
+}
+```
+
+## 4. UseCase base class and concrete implementations
+
+```dart
+abstract class UseCase<Type, Params> {
+  Future<Either<Failure, Type>> call(Params params);
+}
+
+class NoParams {
+  const NoParams();
+}
+
+class LoginUseCase implements UseCase<User, LoginParams> {
+  final AuthRepository _repository;
+
+  const LoginUseCase(this._repository);
+
+  @override
+  Future<Either<Failure, User>> call(LoginParams params) {
+    return _repository.login(
+      email: params.email,
+      password: params.password,
+    );
+  }
+}
+
+class LoginParams {
+  final String email;
+  final String password;
+
+  const LoginParams({required this.email, required this.password});
+}
+
+class GetProductsUseCase implements UseCase<List<Product>, GetProductsParams> {
+  final ProductRepository _repository;
+
+  const GetProductsUseCase(this._repository);
+
+  @override
+  Future<Either<Failure, List<Product>>> call(GetProductsParams params) {
+    return _repository.getProducts(
+      page: params.page,
+      pageSize: params.pageSize,
+      category: params.category,
+    );
+  }
+}
+
+class GetProductsParams {
+  final int page;
+  final int pageSize;
+  final String? category;
+
+  const GetProductsParams({
+    this.page = 0,
+    this.pageSize = 20,
+    this.category,
+  });
+}
+```
+
+## 5. DTOs with mappers in data layer
+
+```dart
+import 'package:json_annotation/json_annotation.dart';
+
+part 'user_dto.g.dart';
+
+@JsonSerializable()
+class UserDto {
+  final String id;
+  final String email;
+  @JsonKey(name: 'display_name')
+  final String displayName;
+  @JsonKey(name: 'avatar_url')
+  final String? avatarUrl;
+  @JsonKey(name: 'created_at')
+  final String createdAt;
+
+  const UserDto({
+    required this.id,
+    required this.email,
+    required this.displayName,
+    this.avatarUrl,
+    required this.createdAt,
+  });
+
+  factory UserDto.fromJson(Map<String, dynamic> json) =>
+      _$UserDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$UserDtoToJson(this);
+
+  User toDomain() => User(
+        id: id,
+        email: email,
+        displayName: displayName,
+        avatarUrl: avatarUrl,
+        createdAt: DateTime.parse(createdAt),
+      );
+}
+```
+
+## 6. DataSource abstractions and implementations
+
+```dart
+abstract class AuthRemoteDataSource {
+  Future<UserDto> login({required String email, required String password});
+  Future<UserDto> register({
+    required String email,
+    required String password,
+    required String displayName,
+  });
+  Future<void> logout();
+  Future<UserDto> getCurrentUser();
+}
+
+@Injectable(as: AuthRemoteDataSource)
+class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
+  final ApiClient _client;
+
+  const AuthRemoteDataSourceImpl(this._client);
+
+  @override
+  Future<UserDto> login({
+    required String email,
+    required String password,
+  }) async {
+    final response = await _client.post(
+      '/auth/login',
+      body: {'email': email, 'password': password},
+    );
+    return UserDto.fromJson(response.data);
+  }
+
+  @override
+  Future<UserDto> register({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    final response = await _client.post(
+      '/auth/register',
+      body: {
+        'email': email,
+        'password': password,
+        'display_name': displayName,
+      },
+    );
+    return UserDto.fromJson(response.data);
+  }
+
+  @override
+  Future<void> logout() async {
+    await _client.post('/auth/logout');
+  }
+
+  @override
+  Future<UserDto> getCurrentUser() async {
+    final response = await _client.get('/auth/me');
+    return UserDto.fromJson(response.data);
+  }
+}
+```
+
+## 7. Repository implementation in data layer
+
+```dart
+@Injectable(as: AuthRepository)
+class AuthRepositoryImpl implements AuthRepository {
+  final AuthRemoteDataSource _remoteDataSource;
+  final AuthLocalDataSource _localDataSource;
+
+  const AuthRepositoryImpl(this._remoteDataSource, this._localDataSource);
+
+  @override
+  Future<Either<Failure, User>> login({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final dto = await _remoteDataSource.login(
+        email: email,
+        password: password,
+      );
+      await _localDataSource.cacheUser(dto);
+      return Right(dto.toDomain());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    } on NetworkException {
+      return Left(const NetworkFailure('No internet connection'));
+    }
+  }
+
+  @override
+  Future<Either<Failure, User>> getCurrentUser() async {
+    try {
+      final dto = await _remoteDataSource.getCurrentUser();
+      return Right(dto.toDomain());
+    } on ServerException {
+      final cached = await _localDataSource.getCachedUser();
+      if (cached != null) {
+        return Right(cached.toDomain());
+      }
+      return Left(const CacheFailure('No cached user'));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> logout() async {
+    try {
+      await _remoteDataSource.logout();
+      await _localDataSource.clearCache();
+      return const Right(null);
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+
+  @override
+  Future<Either<Failure, User>> register({
+    required String email,
+    required String password,
+    required String displayName,
+  }) async {
+    try {
+      final dto = await _remoteDataSource.register(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
+      return Right(dto.toDomain());
+    } on ServerException catch (e) {
+      return Left(ServerFailure(e.message));
+    }
+  }
+}
+```
+
+## 8. Failure hierarchy
+
+```dart
+abstract class Failure {
+  final String message;
+  const Failure(this.message);
+}
+
+class ServerFailure extends Failure {
+  const ServerFailure(super.message);
+}
+
+class NetworkFailure extends Failure {
+  const NetworkFailure(super.message);
+}
+
+class CacheFailure extends Failure {
+  const CacheFailure(super.message);
+}
+
+class ValidationFailure extends Failure {
+  final Map<String, List<String>> fieldErrors;
+  const ValidationFailure(super.message, {this.fieldErrors = const {}});
+}
+```
+
+## 9. Dependency injection with get_it + injectable
+
+```dart
+import 'package:get_it/get_it.dart';
+import 'package:injectable/injectable.dart';
+
+import 'injection.config.dart';
+
+final getIt = GetIt.instance;
+
+@InjectableInit(preferRelativeImports: true)
+void configureDependencies() => getIt.init();
+
+// In main.dart:
+void main() {
+  configureDependencies();
+  runApp(const MyApp());
+}
+```
+
+## 10. BLoC in presentation layer using domain use cases
+
+```dart
+class AuthBloc extends Bloc<AuthEvent, AuthState> {
+  final LoginUseCase _loginUseCase;
+  final GetCurrentUserUseCase _getCurrentUserUseCase;
+
+  AuthBloc({
+    required LoginUseCase loginUseCase,
+    required GetCurrentUserUseCase getCurrentUserUseCase,
+  })  : _loginUseCase = loginUseCase,
+        _getCurrentUserUseCase = getCurrentUserUseCase,
+        super(const AuthState.initial()) {
+    on<AuthLoginRequested>(_onLoginRequested);
+    on<AuthCheckRequested>(_onCheckRequested);
+    on<AuthLogoutRequested>(_onLogoutRequested);
+  }
+
+  Future<void> _onLoginRequested(
+    AuthLoginRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(const AuthState.loading());
+    final result = await _loginUseCase(
+      LoginParams(email: event.email, password: event.password),
+    );
+    result.fold(
+      (failure) => emit(AuthState.error(failure.message)),
+      (user) => emit(AuthState.authenticated(user)),
+    );
+  }
+
+  Future<void> _onCheckRequested(
+    AuthCheckRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    final result = await _getCurrentUserUseCase(const NoParams());
+    result.fold(
+      (_) => emit(const AuthState.unauthenticated()),
+      (user) => emit(AuthState.authenticated(user)),
+    );
+  }
+
+  Future<void> _onLogoutRequested(
+    AuthLogoutRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(const AuthState.unauthenticated());
+  }
+}
+```
+
+## 11. Testing use cases
+
+```dart
+class MockAuthRepository extends Mock implements AuthRepository {}
+
+void main() {
+  late LoginUseCase sut;
+  late MockAuthRepository mockRepository;
+
+  setUp(() {
+    mockRepository = MockAuthRepository();
+    sut = LoginUseCase(mockRepository);
+  });
+
+  group('LoginUseCase', () {
+    const params = LoginParams(email: 'test@test.com', password: 'pass123');
+    final user = User(
+      id: '1',
+      email: 'test@test.com',
+      displayName: 'Test',
+      createdAt: DateTime(2025, 1, 1),
+    );
+
+    test('returns User on successful login', () async {
+      when(() => mockRepository.login(
+            email: any(named: 'email'),
+            password: any(named: 'password'),
+          )).thenAnswer((_) async => Right(user));
+
+      final result = await sut(params);
+
+      expect(result, Right(user));
+      verify(() => mockRepository.login(
+            email: 'test@test.com',
+            password: 'pass123',
+          )).called(1);
+    });
+
+    test('returns ServerFailure on error', () async {
+      when(() => mockRepository.login(
+            email: any(named: 'email'),
+            password: any(named: 'password'),
+          )).thenAnswer((_) async => const Left(ServerFailure('Invalid credentials')));
+
+      final result = await sut(params);
+
+      expect(result, const Left(ServerFailure('Invalid credentials')));
+    });
+  });
+}
+```
+
+# Input Format
+
+```
+Feature: [feature name]
+Entities: [domain entities and their properties]
+API Endpoints:
+  - [method] [path] → [response shape]
+Cache Strategy: [local persistence needs]
+Business Rules: [domain rules and validations]
+```
+
+# Output Format
+
+```
+// MARK: - Domain Layer
+// entities/[name].dart
+// repositories/[name]_repository.dart
+// usecases/[name].dart
+
+// MARK: - Data Layer
+// models/[name]_dto.dart
+// datasources/[name]_datasource.dart
+// repositories/[name]_repository_impl.dart
+
+// MARK: - Presentation Layer
+// bloc/[name]_bloc.dart + events + states
+// pages/[name]_page.dart
+
+// MARK: - Tests
+// [name]_usecase_test.dart
+// [name]_bloc_test.dart
+```
+
+# Constraints
+
+- Domain layer MUST NOT import any Flutter, data-layer, or third-party packages.
+- Data layer depends on domain; presentation depends on domain. Neither depends on each other.
+- All repository methods MUST return Either<Failure, T>; never throw exceptions across layer boundaries.
+- DTOs MUST have explicit toDomain() mappers; never pass DTOs to the presentation layer.
+- Use cases MUST have a single call() method accepting a typed Params object.
+- Dependency injection MUST use get_it with injectable annotations for code generation.
+- BLoC/Cubit MUST only depend on use cases, never on repositories or data sources directly.
+- Every feature MUST follow the data/domain/presentation folder structure.
+- Entities MUST NOT have fromJson/toJson; serialization belongs in the data layer.
+- Tests MUST mock at the repository boundary using mocktail or mockito.

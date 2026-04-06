@@ -1,0 +1,63 @@
+---
+name: compare-libraries
+version: 2.0.0
+domain: exploration
+description: Compare candidate libraries side by side across fit, maturity, maintenance, ecosystem, and production risk.
+tags: [exploration, comparison, libraries, decision-matrix]
+---
+
+## Purpose
+Produce a clean tradeoff comparison when multiple libraries are plausible.
+
+## When to Use
+Use when stakeholders are debating two to five concrete library choices.
+
+## Input Format
+```yaml
+libraries:
+  - string
+problem: string
+evaluation_weights:
+  fit: number
+  maturity: number
+  maintenance: number
+  performance: number
+  ecosystem: number
+```
+
+## Output Format
+```yaml
+comparison:
+  - library: string
+    score: number
+    strengths: string[]
+    weaknesses: string[]
+recommendation:
+  library: string
+  rationale: string
+```
+
+## Execution Logic
+1. Score each library against the weighted criteria.
+2. Penalize weak maintenance, unstable APIs, or ecosystem mismatch.
+3. Highlight where the top candidate loses to runners-up.
+4. Recommend the best overall fit, not the most specialized option by default.
+
+## Rules
+1. Keep criteria explicit.
+2. Separate hard blockers from softer tradeoffs.
+3. Mention migration and team familiarity.
+4. Surface long-term maintenance burden.
+5. State confidence level if the top options are close.
+
+## Constraints
+- Never compare libraries without the project context.
+- Never hide important weaknesses in the winning choice.
+- Never treat GitHub stars as a sufficient criterion.
+
+## Examples
+Input: compare React Query, SWR, and Apollo for a dashboard app.
+Output: weighted comparison with recommendation and caveats.
+
+## Output Style
+Return a compact decision matrix with a clear winner and caveats.

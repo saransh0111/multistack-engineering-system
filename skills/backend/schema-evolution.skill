@@ -1,0 +1,64 @@
+---
+name: schema-evolution
+version: 2.0.0
+domain: backend
+description: Plan database and event schema changes using expand-contract, backfill, compatibility windows, and rollback-safe sequencing.
+tags: [backend, schema, migrations, expand-contract, compatibility]
+---
+
+## Purpose
+Evolve storage and message schemas without downtime or consumer breakage.
+
+## When to Use
+Use when changing relational tables, JSON payloads, protobuf schemas, or event contracts in production systems.
+
+## Input Format
+```yaml
+change:
+  surface: "postgres" | "mysql" | "event-schema" | "protobuf" | "json-api"
+  type: "add" | "rename" | "remove" | "split" | "merge"
+  data_size: "small" | "medium" | "large"
+runtime:
+  zero_downtime_required: boolean
+  mixed_version_window: string
+```
+
+## Output Format
+```yaml
+plan:
+  phases: string[]
+  backward_compatibility: string
+  rollback_point: string
+data_migration:
+  backfill: string
+  validation: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Classify the change as additive or breaking.
+2. IF additive, use expand-first rollout.
+3. IF breaking, create a multi-phase expand-contract plan with dual write or dual read where required.
+4. For large datasets, separate schema change from backfill and throttle the backfill.
+5. Return explicit rollback points and mixed-version compatibility rules.
+
+## Rules
+1. Deploy readers before writers when adding new fields.
+2. Keep old and new representations alive through the mixed-version window.
+3. Validate backfill completeness before removing legacy fields.
+4. For events, prefer adding fields and deprecating over mutating semantics in place.
+5. Pair schema evolution with contract tests and production observability.
+
+## Constraints
+- Never rename in place when rolling deployments span multiple versions.
+- Never combine destructive DDL and application cutover in one step.
+- Never remove legacy fields before adoption data confirms safety.
+
+## Examples
+Input: split `full_name` into `first_name` and `last_name`.
+Output: add new columns, dual write, backfill, read fallback, then remove old column after validation.
+
+## Output Style
+Return a phase-by-phase migration plan with compatibility and rollback notes.

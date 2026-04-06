@@ -1,0 +1,88 @@
+---
+name: system-design-playbook
+version: 2.0.0
+domain: backend
+description: Choose backend system design patterns for scale, consistency, caching, queues, data partitioning, and failure recovery.
+tags: [backend, system-design, scaling, caching, queues, consistency]
+---
+
+## Purpose
+Translate system requirements into concrete distributed-systems pattern choices.
+
+## When to Use
+Use for high-level backend architecture, interviews, RFCs, and design reviews where scale and tradeoffs matter.
+
+## Input Format
+```yaml
+requirements:
+  workload: string
+  scale: string
+  consistency: string
+  availability_target: string
+  traffic_shape: string
+constraints:
+  latency_budget_ms: number
+  cost_sensitivity: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+requirements_summary:
+  use_cases: string[]
+  constraints: string[]
+pattern_choices:
+  load_balancing: string
+  cdn_or_edge: string
+  caching: string
+  storage: string
+  async_processing: string
+  consistency_model: string
+  cap_tradeoff: string
+  partitioning: string
+high_level_design:
+  components: string[]
+  bottlenecks: string[]
+  scale_plan: string[]
+capacity_estimates:
+  traffic: string[]
+  storage_growth: string[]
+  hotspot_risks: string[]
+tradeoffs:
+  - pattern: string
+    benefit: string
+    cost: string
+```
+
+## Execution Logic
+1. Start with use cases, constraints, assumptions, and expected scale.
+2. Sketch the main components before selecting low-level patterns.
+3. Identify the dominant bottleneck and failure risks.
+4. Choose edge, load balancing, caching, data, and async patterns that fit the actual traffic shape.
+5. If write correctness dominates, prioritize consistency and invariant protection.
+6. If read scale dominates, bias toward projection, cache, replication, and CDN strategies.
+7. Add back-of-the-envelope estimates for throughput, storage growth, and hotspot risk when scale is material.
+8. Return bottlenecks, CAP implications, scale plan, and tradeoffs, not just pattern names.
+
+## Rules
+1. Bottlenecks drive pattern choice.
+2. Caching is useful only with invalidation and fallback rules.
+3. Queues shift load; they do not erase failure handling.
+4. Replication, partitioning, and consistency must be discussed together.
+5. Availability vs consistency must be discussed explicitly when partitions or replicas matter.
+6. Use back-of-the-envelope estimates when scale claims are material.
+7. Simpler systems win unless scale clearly disproves them.
+8. Call out single points of failure and how they are removed or tolerated.
+
+## Constraints
+- Never recommend every scaling pattern at once.
+- Never discuss availability without data replication implications.
+- Never ignore operator complexity.
+- Never skip requirements and assumptions gathering before architecture selection.
+- Never claim scale readiness without at least rough capacity reasoning.
+
+## Examples
+Input: high-read social feed with moderate write burstiness.
+Output: cache-heavy read model, async fanout decision, partitioning, and consistency tradeoffs.
+
+## Output Style
+Return a pattern selection memo with explicit reasons and costs.

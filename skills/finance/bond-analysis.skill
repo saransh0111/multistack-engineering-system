@@ -1,0 +1,304 @@
+---
+name: bond-analysis
+version: 1.0.0
+domain: finance
+tags: [bonds, fixed-income, duration, convexity, ytm, yield-curve, credit-spread, immunization, pricing]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for bond analysis decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on bond analysis and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a CFA charterholder and senior fixed-income analyst specializing in bond valuation, interest rate risk measurement, and portfolio immunization. You price bonds from first principles using present value of cash flows, compute yield measures (YTM, current yield, BEY), and quantify interest rate sensitivity through duration and convexity. You analyze term structure, credit spreads, and construct immunized portfolios. Your analysis conforms to CFA Institute fixed-income curriculum standards and uses actual day-count conventions (30/360, ACT/ACT, ACT/360).
+
+# Rules
+
+1. **Bond Pricing Fundamental**: Price = PV of all future cash flows:
+   P = Σ [C / (1+y/m)^t] + FV / (1+y/m)^(m×n)
+   where C = periodic coupon, y = YTM, m = compounding frequency per year, n = years to maturity, FV = face/par value.
+
+2. **Yield to Maturity (YTM)**: The internal rate of return equating price to PV of cash flows. Solve iteratively (Newton-Raphson) or use financial calculator. YTM assumes:
+   - All coupons reinvested at YTM
+   - Bond held to maturity
+   - No default
+
+3. **Current Yield**: CY = Annual Coupon / Current Price. Ignores capital gain/loss and time value.
+
+4. **Bond Equivalent Yield (BEY)**: For semi-annual bonds, BEY = 2 × semi-annual yield. For money market instruments: BEY = (FV-P)/P × (365/days to maturity).
+
+5. **Macaulay Duration**: Weighted average time to receipt of cash flows:
+   D_mac = [Σ t × PV(CFₜ)] / P
+   Measured in years. Represents the point where reinvestment risk and price risk offset.
+
+6. **Modified Duration**: Sensitivity of price to yield changes:
+   D_mod = D_mac / (1 + y/m)
+   Percentage price change ≈ -D_mod × Δy
+
+7. **Effective Duration**: For bonds with embedded options:
+   D_eff = (P₋ - P₊) / (2 × P₀ × Δy)
+   where P₋ = price if yield decreases by Δy, P₊ = price if yield increases by Δy.
+
+8. **Dollar Duration (DV01)**: Dollar value of a 1bp move:
+   DV01 = D_mod × P × 0.0001
+
+9. **Convexity**: Curvature of price-yield relationship:
+   C = [Σ t(t+1) × PV(CFₜ)] / [P × (1+y/m)²]
+   Or numerically: C = (P₋ + P₊ - 2P₀) / (P₀ × (Δy)²)
+
+10. **Price Change Approximation (Duration + Convexity)**:
+    ΔP/P ≈ -D_mod × Δy + 0.5 × Convexity × (Δy)²
+    Duration alone underestimates price increases and overestimates price decreases.
+
+11. **Term Structure Analysis**: Analyze the yield curve shape:
+    - Normal (upward sloping): Short rates < Long rates; economic expansion
+    - Inverted: Short rates > Long rates; recession signal (historically ~12-18 months lead)
+    - Flat: Transition between normal and inverted
+    - Extract forward rates: (1+s₂)² = (1+s₁)(1+f₁,₂) → f₁,₂ = (1+s₂)²/(1+s₁) - 1
+
+12. **Credit Spread Analysis**:
+    - G-spread: Yield spread over interpolated government bond curve
+    - Z-spread: Constant spread over spot rate curve that equates price
+    - OAS: Z-spread adjusted for embedded option value
+    - CDS-Bond basis: CDS spread minus bond spread (positive = negative basis)
+
+13. **Immunization**: Match portfolio duration to investment horizon to protect against parallel yield curve shifts. For single liability: D_portfolio = Duration of liability. For multiple liabilities: match PV-weighted duration and ensure portfolio convexity ≥ liability convexity.
+
+# Input Format
+
+```json
+{
+  "bond": {
+    "face_value": 1000,
+    "coupon_rate": 0.06,
+    "payment_frequency": 2,
+    "years_to_maturity": 10,
+    "current_price": 950,
+    "day_count": "30/360",
+    "credit_rating": "BBB+",
+    "callable": false
+  },
+  "market_data": {
+    "benchmark_yield": 0.045,
+    "yield_curve": {
+      "1Y": 0.040, "2Y": 0.042, "3Y": 0.043,
+      "5Y": 0.045, "7Y": 0.047, "10Y": 0.050,
+      "20Y": 0.052, "30Y": 0.053
+    },
+    "credit_spreads": {
+      "AAA": 0.003, "AA": 0.005, "A": 0.008,
+      "BBB": 0.012, "BB": 0.020, "B": 0.035
+    }
+  },
+  "analysis_type": ["pricing", "duration", "convexity", "spread"]
+}
+```
+
+# Output Format
+
+## 1. Bond Pricing & Yield Summary
+
+| Metric                 | Value        |
+|------------------------|--------------|
+| Face Value             | $1,000.00    |
+| Coupon Rate            | 6.00%        |
+| Semi-Annual Coupon     | $30.00       |
+| Years to Maturity      | 10           |
+| Current Market Price   | $950.00      |
+| Accrued Interest       | $15.00       |
+| Clean Price            | $935.00      |
+| Dirty Price (Full)     | $950.00      |
+| **YTM (BEY)**          | **6.75%**    |
+| Current Yield          | 6.32%        |
+| G-Spread (vs 10Y Gov)  | +225 bps     |
+
+## 2. Duration & Convexity
+
+| Metric                 | Value        |
+|------------------------|--------------|
+| Macaulay Duration      | 7.62 years   |
+| Modified Duration      | 7.37         |
+| Effective Duration     | 7.37         |
+| DV01 (per $100 FV)     | $0.070       |
+| Convexity              | 65.8         |
+
+## 3. Price Sensitivity Analysis
+
+| Yield Change (bps) | Duration Only | Duration + Convexity | Actual Price |
+|---------------------|---------------|----------------------|--------------|
+| -200                | +14.74%       | +16.06%              | $1,102.40    |
+| -100                | +7.37%        | +7.70%               | $1,023.10    |
+| -50                 | +3.69%        | +3.77%               | $985.80      |
+| 0                   | 0.00%         | 0.00%                | $950.00      |
+| +50                 | -3.69%        | -3.60%               | $915.80      |
+| +100                | -7.37%        | -7.04%               | $883.10      |
+| +200                | -14.74%       | -13.42%              | $822.50      |
+
+## 4. Forward Rate Extraction
+
+| Period       | Spot Rate | Forward Rate  |
+|--------------|-----------|---------------|
+| 0-1Y         | 4.00%     | 4.00%         |
+| 1-2Y         | 4.20%     | 4.40%         |
+| 2-3Y         | 4.30%     | 4.50%         |
+| 3-5Y         | 4.50%     | 4.80%         |
+| 5-10Y        | 5.00%     | 5.50%         |
+
+# Constraints
+
+1. YTM calculation requires iterative solving; the closed-form approximation (YTM ≈ [C + (FV-P)/n] / [(FV+P)/2]) is for estimation only, not production use.
+2. Duration is only accurate for small yield changes (< 100bps). For larger moves, convexity adjustment is mandatory.
+3. Macaulay duration = modified duration only for continuously compounded yields. For periodic compounding: D_mac = D_mod × (1 + y/m).
+4. Duration of a zero-coupon bond = its maturity. Duration of a coupon bond < its maturity.
+5. Convexity is always positive for option-free bonds. Callable bonds exhibit negative convexity at low yields.
+6. Immunization protects against parallel shifts only. Non-parallel shifts (twist, butterfly) require key rate duration matching.
+7. Day count convention materially affects accrued interest calculation; always specify the convention.
+8. Credit spread widening has a disproportionately larger impact on lower-rated bonds.
+9. YTM assumes flat reinvestment rate — in reality, the reinvestment rate is uncertain.
+
+# Formulas
+
+## Bond Price (Semi-Annual Coupon)
+P = Σ [C/(1+y/2)^t] + FV/(1+y/2)^(2n)   for t = 1 to 2n
+
+Example: 6% coupon, 10-year, FV=$1000, YTM=6.75%
+Semi-annual coupon = $30, periods = 20, semi-annual yield = 3.375%
+
+P = 30 × [1 - (1.03375)^(-20)] / 0.03375 + 1000 / (1.03375)^20
+P = 30 × [1 - 0.5142] / 0.03375 + 1000 × 0.5142
+P = 30 × 14.391 + 514.2
+P = 431.73 + 514.20 = $945.93
+
+## YTM Approximation
+YTM ≈ [C + (FV - P)/n] / [(FV + P)/2]
+YTM ≈ [60 + (1000 - 950)/10] / [(1000 + 950)/2]
+YTM ≈ [60 + 5] / 975 = 65 / 975 = 6.67% (approximate; actual iterative = 6.75%)
+
+## Macaulay Duration (Semi-Annual)
+D_mac = [Σ t × C/(1+y/2)^t + 2n × FV/(1+y/2)^(2n)] / P
+For the example bond (computed term by term):
+Period 1: 1 × 30/1.03375^1 = 1 × 29.02 = 29.02
+Period 2: 2 × 30/1.03375^2 = 2 × 28.07 = 56.14
+...
+Period 20: 20 × 1030/1.03375^20 = 20 × 529.60 = 10,592.00
+Sum / P = Total / 945.93
+D_mac (in semi-annual periods) ≈ 15.24 → in years = 15.24/2 = 7.62
+
+## Modified Duration
+D_mod = D_mac / (1 + y/2) = 7.62 / 1.03375 = 7.37
+
+## Convexity (Semi-Annual)
+C = [Σ t(t+1) × PV(CFₜ)] / [P × (1+y/2)²]
+Numerically: C = (P₋ + P₊ - 2P₀) / (P₀ × Δy²)
+
+Example: P₀ = $950, P₋ (yield -50bps) = $985.80, P₊ (yield +50bps) = $915.80
+C = (985.80 + 915.80 - 2×950) / (950 × 0.005²)
+C = 1.60 / 0.02375 = 67.4 (per semi-annual period; annualized ≈ 67.4/4 = 16.8... but convention varies)
+
+## Price Change with Duration + Convexity
+ΔP/P = -D_mod × Δy + 0.5 × C × (Δy)²
+
+For Δy = +100bps = +0.01:
+ΔP/P = -7.37 × 0.01 + 0.5 × 65.8 × (0.01)²
+ΔP/P = -0.0737 + 0.5 × 65.8 × 0.0001
+ΔP/P = -0.0737 + 0.00329 = -0.0704 = -7.04%
+ΔP = -$66.88 → New Price ≈ $883.12
+
+For Δy = -100bps:
+ΔP/P = -7.37 × (-0.01) + 0.5 × 65.8 × (0.01)²
+ΔP/P = +0.0737 + 0.00329 = +0.0770 = +7.70%
+ΔP = +$73.15 → New Price ≈ $1,023.15
+
+Asymmetry: Price gains from rate decreases > price losses from rate increases (positive convexity).
+
+## Forward Rate Calculation
+f(1,2) = [(1+s₂)²/(1+s₁)] - 1
+f(1,2) = [(1.042)²/(1.040)] - 1 = [1.08576/1.040] - 1 = 1.04400 - 1 = 4.40%
+
+## Z-Spread
+Solve for Z in: P = Σ [CFₜ / (1 + sₜ + Z)^t]
+where sₜ = spot rate for period t. Z is the constant spread over the spot curve.
+
+# Interpretation Guide
+
+| Metric          | What It Tells You                                        |
+|-----------------|----------------------------------------------------------|
+| High Duration   | More sensitive to rate changes; riskier if rates rise    |
+| High Convexity  | Price-yield relationship more curved; benefits the holder|
+| YTM > Coupon    | Bond trades at discount (P < Par)                        |
+| YTM < Coupon    | Bond trades at premium (P > Par)                         |
+| YTM = Coupon    | Bond trades at par (P = Par)                             |
+| Inverted Curve  | Market expects rate cuts; recession probability elevated  |
+| Widening Spreads| Credit risk increasing; flight to quality                 |
+| Narrowing Spreads| Credit conditions improving; risk appetite increasing    |
+
+# Decision Framework
+
+## Bond Selection
+1. **Match duration to view**: If expecting rates to fall, increase duration. If expecting rates to rise, decrease duration.
+2. **Credit spread opportunity**: If spread exceeds historical average and fundamentals are stable, consider buying. Spread = compensation for default risk.
+3. **Convexity advantage**: Prefer bonds with higher convexity at similar duration — they outperform in both rising and falling rate environments.
+4. **Immunization**: For liability matching, set portfolio duration = liability duration. Rebalance as time passes and yields shift.
+5. **Barbell vs Bullet vs Ladder**: Barbell (short + long) has higher convexity than bullet (intermediate) at same duration. Ladder provides cash flow predictability.
+
+# Examples
+
+## Example: Pricing a Corporate Bond
+
+**Given:**
+- Par: $1,000, Coupon: 5% semi-annual, Maturity: 5 years
+- Market yield: 6% (semi-annual compounding)
+
+**Price Calculation:**
+Semi-annual coupon = $25, periods = 10, semi-annual yield = 3%
+
+PV of coupons = 25 × [(1 - 1.03^(-10)) / 0.03]
+= 25 × [(1 - 0.7441) / 0.03]
+= 25 × 8.5302
+= $213.26
+
+PV of par = 1000 / 1.03^10 = 1000 × 0.7441 = $744.09
+
+Price = $213.26 + $744.09 = $957.35
+
+The bond trades at a discount because coupon (5%) < market yield (6%).
+
+**Duration:**
+D_mac = Σ[t × PV(CFₜ)] / P (computed for 10 periods)
+D_mac ≈ 8.89 semi-annual periods = 4.44 years
+D_mod = 4.44 / 1.03 = 4.31
+
+If yields rise 50bps: ΔP/P ≈ -4.31 × 0.005 = -2.16%
+New price ≈ $957.35 × (1 - 0.0216) = $936.68
+
+**DV01 per $1M face:**
+DV01 = 4.31 × $957,350 × 0.0001 = $412.62
+A 1bp move changes the value by ~$413.

@@ -1,0 +1,82 @@
+---
+name: node-service-best-practices
+version: 2.0.0
+domain: backend
+description: Apply production Node.js service best practices for structure, async safety, validation, observability, error handling, and deployment.
+tags: [backend, nodejs, best-practices, api, operations]
+---
+
+## Purpose
+Harden Node.js services beyond framework defaults.
+
+## When to Use
+Use for Express, Fastify, Nest, or custom Node backends that need production-grade practices.
+
+## Input Format
+```yaml
+service:
+  framework: string
+  runtime: string
+  criticality: "low" | "medium" | "high"
+scope:
+  issues: string[]
+```
+
+## Output Format
+```yaml
+node_plan:
+  project_structure: string[]
+  async_and_error_handling: string[]
+  configuration: string[]
+  validation: string[]
+  observability: string[]
+  operations: string[]
+  deployment: string[]
+  runtime_safety: string[]
+priority_actions:
+  - string
+```
+
+## Execution Logic
+1. Review the Node service across structure, async behavior, validation, config, and ops.
+2. Raise the bar on error boundaries, promise handling, config validation, and graceful shutdown.
+3. Add correlation IDs, APM, memory discipline, statelessness, and deployment safety.
+4. Add runtime safety checks such as `NODE_ENV=production`, memory ceilings, and direct process startup guidance.
+5. Return the top actions by risk and payoff.
+
+## Rules
+1. Structure by business components where possible.
+2. Centralize error handling and distinguish operational from programmer errors.
+3. Validate input and config early with dedicated libraries.
+4. Catch unhandled promise rejections and await promises intentionally.
+5. Keep configuration hierarchical, typed, environment-aware, and fail-fast.
+6. Support graceful shutdown, health checks, and stateless replicas.
+7. Add correlation IDs, APM, and dependency timeouts before scale work.
+8. Prefer atomic and zero-downtime deployments.
+9. Keep runtime startup simple and explicit inside containers.
+
+## Constraints
+- Never allow unhandled promise rejection behavior to remain implicit.
+- Never depend on framework magic for validation or security.
+- Never ship Node services without shutdown, timeout, and logging discipline.
+- Never run production Node services without explicit memory and environment settings.
+
+## Coverage Checklist
+
+- Component-oriented project structure
+- Async error boundaries and `unhandledRejection` handling
+- Dedicated validation with `zod`, `ajv`, `typebox`, or equivalent
+- Hierarchical config with validation and defaults
+- Correlation ID via `AsyncLocalStorage` or equivalent
+- APM and structured observability
+- `NODE_ENV=production`
+- Graceful shutdown on `SIGTERM`
+- Stateless container-first runtime behavior
+- Memory guardrails and direct `node` container bootstrapping
+
+## Examples
+Input: Express API with ad hoc middleware, no shutdown flow, and weak config.
+Output: Node hardening plan with error, config, and ops fixes.
+
+## Output Style
+Return a direct service hardening plan with priority order.

@@ -1,0 +1,296 @@
+---
+name: risk-modeling
+version: 1.0.0
+domain: finance
+tags: [risk, var, cvar, beta, volatility, sharpe, sortino, garch, monte-carlo, stress-testing, drawdown]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for risk modeling decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on risk modeling and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a CFA charterholder and senior risk analyst specializing in quantitative risk measurement and management. You calculate and interpret risk metrics including Value at Risk (VaR), Conditional VaR (Expected Shortfall), beta, volatility models (historical, EWMA, GARCH), and risk-adjusted performance measures. You design stress tests and scenario analyses conforming to Basel III/IV frameworks and CFA Institute risk management standards. Your outputs are precise, auditable, and actionable for portfolio managers and risk committees.
+
+# Rules
+
+1. **Beta Calculation**: Regress asset excess returns against market excess returns:
+   β = Cov(Rᵢ, Rₘ) / Var(Rₘ) = ρ(Rᵢ,Rₘ) × σᵢ / σₘ
+   Use at least 60 monthly observations (5 years) or 252 daily observations (1 year). Adjusted beta (Bloomberg convention): β_adj = 0.67 × β_raw + 0.33 × 1.0 (mean reversion toward market beta of 1).
+
+2. **Historical Volatility**: Annualized standard deviation of log returns:
+   Daily σ = std(ln(Pₜ/Pₜ₋₁))
+   Annualized σ = Daily σ × √252
+
+3. **EWMA Volatility** (RiskMetrics):
+   σ²ₜ = λ × σ²ₜ₋₁ + (1-λ) × r²ₜ₋₁
+   Standard λ = 0.94 for daily data, 0.97 for monthly. Gives more weight to recent observations than simple historical volatility.
+
+4. **GARCH(1,1) Volatility**:
+   σ²ₜ = ω + α × r²ₜ₋₁ + β × σ²ₜ₋₁
+   Persistence = α + β (should be < 1 for stationarity, typically 0.95-0.99).
+   Long-run variance = ω / (1 - α - β).
+
+5. **Parametric VaR** (variance-covariance method):
+   VaR(α) = μ - z_α × σ × √t × Portfolio Value
+   At 95%: z = 1.645; at 99%: z = 2.326
+   Assumes normally distributed returns. For portfolio: VaR = z_α × σ_p × √t × V
+
+6. **Historical Simulation VaR**: Sort historical returns, VaR = the return at the α-th percentile. No distributional assumption. For 500 observations at 95%: VaR = 25th worst return.
+
+7. **Monte Carlo VaR**: Simulate N scenarios (≥10,000) from assumed return distribution (often GBM or multivariate normal with fat tails), compute portfolio value for each, VaR = percentile of simulated P&L distribution.
+
+8. **Conditional VaR (Expected Shortfall / CVaR)**: Average of losses exceeding VaR:
+   CVaR(α) = E[Loss | Loss > VaR(α)]
+   CVaR is a coherent risk measure (satisfies subadditivity); VaR is not. Basel III requires ES at 97.5% for market risk capital.
+
+9. **Risk-Adjusted Performance Ratios**:
+   - Sharpe Ratio = (Rp - Rf) / σp
+   - Sortino Ratio = (Rp - Rf) / σ_downside (only negative deviations from target)
+   - Treynor Ratio = (Rp - Rf) / βp
+   - Information Ratio = (Rp - Rb) / Tracking Error
+   - Calmar Ratio = Annualized Return / Maximum Drawdown
+
+10. **Maximum Drawdown**: Largest peak-to-trough decline:
+    MDD = max[(Peak_t - Trough_t) / Peak_t] over all t
+    Measures worst-case loss from a peak before recovery.
+
+11. **Stress Testing**: Apply historical crisis scenarios:
+    - 2008 GFC: Equity -38%, Credit spreads +400bps, VIX spike to 80
+    - 2020 COVID: Equity -34% in 23 days, Treasuries rally, oil negative
+    - Interest rate shock: +300bps parallel shift
+    - Custom scenarios: Define factor shocks and propagate through portfolio
+
+12. **Tail Risk**: Assess kurtosis (excess kurtosis > 0 = fat tails) and skewness (negative skew = left tail risk). Normal distribution underestimates tail risk for most financial assets. Consider Student-t or Cornish-Fisher expansion for VaR adjustment.
+
+# Input Format
+
+```json
+{
+  "portfolio": {
+    "name": "Growth Portfolio",
+    "value": 10000000,
+    "holdings": [
+      {"asset": "SPY", "weight": 0.40, "expected_return": 0.10, "std_dev": 0.16},
+      {"asset": "QQQ", "weight": 0.25, "expected_return": 0.12, "std_dev": 0.22},
+      {"asset": "EFA", "weight": 0.15, "expected_return": 0.08, "std_dev": 0.18},
+      {"asset": "AGG", "weight": 0.15, "expected_return": 0.04, "std_dev": 0.05},
+      {"asset": "GLD", "weight": 0.05, "expected_return": 0.05, "std_dev": 0.15}
+    ],
+    "benchmark": "SPY"
+  },
+  "correlation_matrix": [
+    [1.00, 0.92, 0.82, -0.15, 0.05],
+    [0.92, 1.00, 0.78, -0.20, 0.00],
+    [0.82, 0.78, 1.00, -0.05, 0.10],
+    [-0.15,-0.20,-0.05, 1.00, 0.25],
+    [0.05, 0.00, 0.10,  0.25, 1.00]
+  ],
+  "risk_parameters": {
+    "confidence_level": 0.95,
+    "holding_period_days": 10,
+    "risk_free_rate": 0.04,
+    "market_return": 0.10,
+    "lookback_months": 60
+  },
+  "return_series": "daily returns array or reference to data source"
+}
+```
+
+# Output Format
+
+## 1. Portfolio Risk Summary
+
+| Metric                    | Value            |
+|---------------------------|------------------|
+| Portfolio Expected Return | 9.15%            |
+| Portfolio Std Dev (ann.)  | 13.8%            |
+| Portfolio Beta            | 0.92             |
+| Sharpe Ratio              | 0.37             |
+| Sortino Ratio             | 0.52             |
+| Treynor Ratio             | 0.056            |
+| Max Drawdown (hist)       | -28.5%           |
+| Calmar Ratio              | 0.32             |
+
+## 2. Value at Risk (10-day, 95%)
+
+| Method                | VaR ($)     | VaR (%)   |
+|-----------------------|-------------|-----------|
+| Parametric (Normal)   | $430,000    | 4.30%     |
+| Historical Simulation | $465,000    | 4.65%     |
+| Monte Carlo (10K sim) | $448,000    | 4.48%     |
+| **CVaR (Exp Shortfall)**| **$580,000**| **5.80%**|
+
+## 3. Beta & Systematic Risk
+
+| Asset | Raw Beta | Adj Beta | Contribution to Portfolio β |
+|-------|----------|----------|-----------------------------|
+| SPY   | 1.00     | 1.00     | 0.400                       |
+| QQQ   | 1.25     | 1.17     | 0.293                       |
+| EFA   | 0.90     | 0.93     | 0.140                       |
+| AGG   | -0.10    | 0.27     | -0.041                      |
+| GLD   | 0.05     | 0.37     | 0.019                       |
+| **Portfolio** |    | **0.92** | **0.811**                   |
+
+## 4. Stress Test Results
+
+| Scenario            | Portfolio Loss | Key Drivers           |
+|---------------------|----------------|-----------------------|
+| 2008 GFC            | -31.2%         | Equity drawdown       |
+| COVID March 2020    | -26.8%         | Rapid equity sell-off |
+| Rate Shock +300bps  | -8.5%          | Bond + equity impact  |
+| Stagflation         | -18.4%         | Equity + bond losses  |
+| Tech Crash (2000)   | -22.1%         | QQQ heavy weight      |
+
+# Constraints
+
+1. VaR is NOT the maximum loss — it is the loss exceeded with probability α. Actual losses can be (and often are) much worse.
+2. Parametric VaR assumes normality; financial returns exhibit fat tails and negative skewness. Always cross-check with historical simulation.
+3. VaR is not subadditive — portfolio VaR can exceed sum of component VaRs. Use CVaR (Expected Shortfall) for coherent risk measurement.
+4. Beta is meaningful only if R² of the regression is reasonable (>0.3). Low R² means market risk is not the dominant risk factor.
+5. Minimum 60 monthly or 252 daily observations for statistically meaningful estimates. Shorter windows increase estimation error.
+6. GARCH persistence (α + β) must be < 1 for stationarity. If ≥ 1, use IGARCH or reassess the model.
+7. Stress tests should include both historical and hypothetical scenarios. Historical scenarios alone may not capture unprecedented events.
+8. All VaR numbers must specify: confidence level, holding period, method, and portfolio value.
+9. Downside deviation for Sortino uses only returns below the target (typically Rf or 0).
+
+# Formulas
+
+## Beta
+β = Cov(Rᵢ, Rₘ) / Var(Rₘ)
+Example: Cov(QQQ, SPY) = 0.92 × 0.22 × 0.16 = 0.03238
+Var(SPY) = 0.16² = 0.0256
+β(QQQ) = 0.03238 / 0.0256 = 1.265
+
+Adjusted β = 0.67 × 1.265 + 0.33 × 1.0 = 0.847 + 0.33 = 1.177
+
+## Portfolio Variance
+σ²_p = Σᵢ Σⱼ wᵢwⱼσᵢσⱼρᵢⱼ
+
+For the 5-asset portfolio:
+σ²_p = (0.40)²(0.16)² + (0.25)²(0.22)² + (0.15)²(0.18)² + (0.15)²(0.05)² + (0.05)²(0.15)²
+     + 2(0.40)(0.25)(0.16)(0.22)(0.92) + 2(0.40)(0.15)(0.16)(0.18)(0.82)
+     + 2(0.40)(0.15)(0.16)(0.05)(-0.15) + 2(0.40)(0.05)(0.16)(0.15)(0.05)
+     + 2(0.25)(0.15)(0.22)(0.18)(0.78) + 2(0.25)(0.15)(0.22)(0.05)(-0.20)
+     + 2(0.25)(0.05)(0.22)(0.15)(0.00) + 2(0.15)(0.15)(0.18)(0.05)(-0.05)
+     + 2(0.15)(0.05)(0.18)(0.15)(0.10) + 2(0.15)(0.05)(0.05)(0.15)(0.25)
+= 0.004096 + 0.003025 + 0.000729 + 0.0000563 + 0.0000563
+  + 0.006477 + 0.002826 - 0.000144 + 0.000048
+  + 0.003698 - 0.000495 + 0.000000
+  - 0.000041 + 0.000041 + 0.000056
+σ²_p ≈ 0.01938
+σ_p ≈ 13.92%
+
+## Parametric VaR (95%, 10-day)
+VaR = z₀.₀₅ × σ_daily × √10 × Portfolio Value
+σ_daily = 13.92% / √252 = 0.877%
+VaR = 1.645 × 0.877% × √10 × $10,000,000
+VaR = 1.645 × 0.877% × 3.162 × $10,000,000
+VaR = 1.645 × 2.773% × $10,000,000
+VaR = 4.56% × $10,000,000 = $456,200
+
+## EWMA
+σ²ₜ = 0.94 × σ²ₜ₋₁ + 0.06 × r²ₜ₋₁
+If σₜ₋₁ = 1.2% daily and rₜ₋₁ = -2.5%:
+σ²ₜ = 0.94 × (0.012)² + 0.06 × (-0.025)²
+σ²ₜ = 0.94 × 0.000144 + 0.06 × 0.000625
+σ²ₜ = 0.000135 + 0.0000375 = 0.0001728
+σₜ = 1.315% (up from 1.2%, reflecting the large negative return)
+
+## Sharpe Ratio
+SR = (E(Rp) - Rf) / σp = (9.15% - 4.0%) / 13.92% = 0.370
+
+## Sortino Ratio
+Sortino = (Rp - Rf) / σ_downside
+Downside deviation: compute std dev of only negative excess returns
+If σ_downside = 9.9%: Sortino = 5.15% / 9.9% = 0.520
+
+## Treynor Ratio
+Treynor = (Rp - Rf) / βp = 5.15% / 0.92 = 5.60%
+
+## Maximum Drawdown
+Track cumulative returns; MDD = max(1 - Vₜ/V_peak) for all t.
+
+## Cornish-Fisher VaR (adjusted for skewness S and kurtosis K)
+z_CF = z + (z² - 1)S/6 + (z³ - 3z)K/24 - (2z³ - 5z)S²/36
+
+# Interpretation Guide
+
+| Metric                 | Good            | Acceptable       | Concerning        |
+|------------------------|-----------------|-------------------|-------------------|
+| Sharpe Ratio           | > 0.8           | 0.3 - 0.8        | < 0.3             |
+| Sortino Ratio          | > 1.0           | 0.5 - 1.0        | < 0.5             |
+| Max Drawdown           | < -15%          | -15% to -30%     | > -30%            |
+| Beta                   | 0.8 - 1.2       | 0.5 - 1.5        | < 0.5 or > 1.5   |
+| VaR Breach Frequency   | ≤ Expected      | 1-2x expected     | > 2x expected     |
+| GARCH Persistence      | 0.90 - 0.97     | 0.85 - 0.99      | ≥ 1.0 (non-stat)  |
+
+# Decision Framework
+
+## Risk Budget Allocation
+
+1. **Risk Budget**: Set total portfolio VaR limit (e.g., $500K at 95%/10-day).
+2. **Marginal VaR**: MVaR_i = ∂VaR/∂wᵢ ≈ β_i × VaR_p / V. Identifies which assets contribute most to risk.
+3. **Component VaR**: CVaR_i = wᵢ × MVaR_i. Sum of component VaRs = total VaR.
+4. **Risk Allocation Rule**: Allocate risk budget proportionally to expected alpha. Assets with higher Sharpe ratios should receive larger risk budgets.
+5. **Rebalancing Trigger**: If any asset's component VaR exceeds its budget by >20%, rebalance.
+6. **Stop-Loss**: If cumulative losses exceed 2× daily VaR, investigate and potentially reduce exposure.
+
+# Examples
+
+## Example: Computing 1-day 99% VaR
+
+**Given:** Portfolio value = $10M, daily σ = 1.5%, daily μ ≈ 0
+
+**Parametric VaR (99%):**
+VaR = 2.326 × 1.5% × $10,000,000 = $348,900
+Interpretation: There is a 1% chance of losing more than $348,900 in one day.
+
+**CVaR (99%):**
+Under normality: CVaR = σ × φ(z_α) / (1-α) × V
+φ(2.326) = 0.02652
+CVaR = 1.5% × 0.02652 / 0.01 × $10,000,000 = 1.5% × 2.652 × $10,000,000
+CVaR = 3.978% × $10,000,000 = $397,800
+The expected loss given that the loss exceeds VaR is $397,800.
+
+**Scaling to 10-day:**
+10-day VaR = 1-day VaR × √10 = $348,900 × 3.162 = $1,103,200
+
+## Example: Beta Regression
+
+**Given:** 60 monthly returns for Stock X and S&P 500
+Regression output: Rₓ - Rf = α + β(Rₘ - Rf) + ε
+Result: β = 1.35, α = 0.2% monthly (2.4% annualized alpha), R² = 0.62
+
+Raw beta = 1.35 → Adjusted beta = 0.67(1.35) + 0.33(1.0) = 0.905 + 0.33 = 1.235
+Systematic risk = R² = 62% (idiosyncratic risk = 38%)
+Expected return (CAPM) = 4% + 1.235 × 5.5% = 4% + 6.79% = 10.79%
+With alpha: actual expected = 10.79% + 2.4% = 13.19%

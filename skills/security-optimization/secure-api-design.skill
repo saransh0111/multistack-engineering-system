@@ -1,0 +1,63 @@
+---
+name: secure-api-design
+version: 2.0.0
+domain: security-optimization
+description: Design APIs with least privilege, validation, abuse protection, and secure error handling aligned to OWASP principles.
+tags: [security, api, owasp, validation, abuse-protection]
+---
+
+## Purpose
+Design APIs that are hard to abuse, easy to audit, and safe by default.
+
+## When to Use
+Use for public, partner, and internal APIs that carry sensitive actions, user data, or business-critical workflows.
+
+## Input Format
+```yaml
+api:
+  audience: "public" | "partner" | "internal"
+  protocol: "rest" | "graphql" | "grpc"
+  sensitive_operations: string[]
+requirements:
+  auth_model: string
+  rate_limits_needed: boolean
+  auditability: "standard" | "high"
+```
+
+## Output Format
+```yaml
+security_design:
+  authz_model: string
+  validation_layers: string[]
+  abuse_controls: string[]
+  error_policy: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Identify trust boundaries, principals, and high-risk operations.
+2. IF the API is public, harden authentication, throttling, and schema validation at the edge.
+3. Map authorization to resource ownership and action scope.
+4. Add secure defaults for input validation, output encoding, logging, and error handling.
+5. Return abuse controls and audit requirements with the design.
+
+## Rules
+1. Deny by default.
+2. Validate shape, type, and business invariants separately.
+3. Use resource-level authorization, not role names alone.
+4. Log security-relevant actions without leaking secrets.
+5. Return stable error envelopes that do not expose internals.
+
+## Constraints
+- Never trust client-provided identifiers without ownership checks.
+- Never expose stack traces or raw database errors.
+- Never make rate limiting optional for public mutation paths.
+
+## Examples
+Input: public payments API with partner tokens and admin workflows.
+Output: scoped authz, layered validation, throttling, audit logs, and safe error policy.
+
+## Output Style
+Return a secure API brief with controls and concrete risks.

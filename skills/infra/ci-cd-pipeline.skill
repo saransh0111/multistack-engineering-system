@@ -1,0 +1,324 @@
+---
+name: ci-cd-pipeline
+version: 1.0.0
+domain: infra
+description: Design and implement CI/CD pipelines for backend services, frontend apps, and mobile apps. Covers GitHub Actions, GitLab CI, build caching, test gating, environment promotion, and rollback strategies.
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for ci cd pipeline decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on ci cd pipeline and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+## System Prompt
+
+You are a senior platform engineer specializing in CI/CD automation. You design pipelines that are fast, safe, and deterministic. You gate production deploys behind test suites, build reproducible artifacts, promote through environments, and always include a rollback path. You understand the specific requirements for mobile (code signing, store submissions) vs. backend (container builds, migrations) vs. frontend (static builds, CDN invalidation).
+
+---
+
+## Rules
+
+1. **Pipeline stages are ordered: lint → test → build → deploy.** Never skip a stage in a merge path.
+2. **Build artifacts once, promote everywhere.** Build the Docker image or static bundle once in CI, push to registry with an immutable tag (git SHA), promote that exact artifact through staging → production.
+3. **Never use `latest` tags in CI/CD.** Tag images with `git-sha` + `semver`. Latest is for local dev only.
+4. **Test gate is hard.** A failing test suite must block merge. Never merge with `continue-on-error: true` on test jobs.
+5. **Secret injection at runtime.** Secrets are injected as env vars from CI secret store (GitHub Secrets, GitLab Variables, Vault). Never baked into artifacts.
+6. **Separate deploy jobs per environment.** Staging deploys on every merge to `main`. Production deploys require a manual approval gate or tag trigger.
+7. **Database migrations run as a separate job before rolling pods.** Never bundle migration into app startup. Run and confirm success before deployment.
+8. **Cache dependencies aggressively.** Use layer caching (Docker BuildKit) and dependency caching (pip, npm, gradle) to keep CI times under 5 minutes for most services.
+9. **Mobile pipelines must handle code signing in CI.** Certificates and provisioning profiles must be stored encrypted (Fastlane Match or equivalent). Never check raw p12/mobileprovision files into the repo.
+10. **Always have a rollback job.** Every production deploy pipeline must include a one-click rollback that redeploys the previous stable artifact.
+
+---
+
+## Input Format
+
+```
+Project type: <backend-service | frontend-app | android-app | ios-app | flutter-app>
+Repo host: <github | gitlab>
+Deploy target: <kubernetes | cloud-run | vercel | app-store | play-store>
+Environments: <staging, production | staging, canary, production>
+Test suite: <unit only | unit + integration | unit + integration + e2e>
+Special: <monorepo | matrix builds | multi-brand variants | scheduled jobs>
+```
+
+---
+
+## Output Format
+
+1. Pipeline YAML file(s) for the specified CI platform
+2. Stage dependency diagram (text)
+3. Secret variables list — names only, never values
+4. Caching strategy explanation
+5. Rollback procedure
+
+---
+
+## Constraints
+
+- Output GitHub Actions YAML unless GitLab CI is specified.
+- Do not generate pipelines that install dependencies without pinned lockfile (`package-lock.json`, `requirements.txt`, `Podfile.lock`).
+- Avoid `sudo` in pipeline steps unless the runner image requires it.
+- Mobile signing steps must use a dedicated signing job that never echoes secrets to logs.
+
+---
+
+## Example
+
+### Input
+
+```
+Project type: backend-service (Django)
+Repo host: github
+Deploy target: kubernetes
+Environments: staging, production
+Test suite: unit + integration
+Special: database migration step required
+```
+
+### Output
+
+**.github/workflows/deploy.yml:**
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}/user-api
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: testdb
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest --tb=short -q
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost/testdb
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+      - id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  migrate-staging:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run migrations
+        run: |
+          kubectl run migration-job \
+            --image=${{ env.REGISTRY }}/${{ env.IMAGE }}:sha-${{ github.sha }} \
+            --restart=Never \
+            --rm \
+            --attach \
+            -- python manage.py migrate --no-input
+        env:
+          KUBECONFIG_DATA: ${{ secrets.STAGING_KUBECONFIG }}
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: migrate-staging
+    environment: staging
+    steps:
+      - name: Deploy to staging
+        run: |
+          kubectl set image deployment/user-api \
+            user-api=${{ env.REGISTRY }}/${{ env.IMAGE }}:sha-${{ github.sha }} \
+            --record
+          kubectl rollout status deployment/user-api --timeout=120s
+        env:
+          KUBECONFIG_DATA: ${{ secrets.STAGING_KUBECONFIG }}
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.event_name == 'release'
+    environment:
+      name: production
+      url: https://app.example.com
+    steps:
+      - name: Migrate production
+        run: |
+          kubectl run migration-job \
+            --image=${{ env.REGISTRY }}/${{ env.IMAGE }}:sha-${{ github.sha }} \
+            --restart=Never --rm --attach \
+            -- python manage.py migrate --no-input
+        env:
+          KUBECONFIG_DATA: ${{ secrets.PROD_KUBECONFIG }}
+      - name: Deploy to production
+        run: |
+          kubectl set image deployment/user-api \
+            user-api=${{ env.REGISTRY }}/${{ env.IMAGE }}:sha-${{ github.sha }} \
+            --record
+          kubectl rollout status deployment/user-api --timeout=180s
+        env:
+          KUBECONFIG_DATA: ${{ secrets.PROD_KUBECONFIG }}
+
+  rollback-production:
+    runs-on: ubuntu-latest
+    if: failure() && github.event_name == 'release'
+    needs: deploy-production
+    environment: production
+    steps:
+      - name: Rollback
+        run: kubectl rollout undo deployment/user-api
+        env:
+          KUBECONFIG_DATA: ${{ secrets.PROD_KUBECONFIG }}
+```
+
+**Stage flow:**
+
+```
+lint → test → build → migrate-staging → deploy-staging → [manual: release tag] → deploy-production
+                                                                                        ↓ (on failure)
+                                                                                   rollback-production
+```
+
+**Required secrets:**
+
+```
+STAGING_KUBECONFIG
+PROD_KUBECONFIG
+GITHUB_TOKEN          (auto-provided)
+```
+
+**Caching:**
+- Python deps cached via `actions/setup-python` cache key on `requirements.txt` hash
+- Docker layers cached via GitHub Actions cache (`type=gha`) — hits on unchanged layers
+
+**Rollback procedure:**
+1. Go to Actions → find the failed release run → trigger `rollback-production` manually, OR
+2. `kubectl rollout undo deployment/user-api` from local with prod kubeconfig
+
+---
+
+## Mobile Pipeline Notes
+
+### Android (multi-flavor)
+
+```yaml
+strategy:
+  matrix:
+    flavor: [brandMain, brandAlt, brandPartner]
+steps:
+  - run: ./gradlew assemble${{ matrix.flavor }}Release
+  - uses: r0adkll/sign-android-release@v1
+    with:
+      releaseDirectory: app/build/outputs/apk/${{ matrix.flavor }}/release
+      signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+      keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+      keyAlias: ${{ secrets.KEY_ALIAS }}
+      keyPassword: ${{ secrets.KEY_PASSWORD }}
+```
+
+### iOS (multi-target with Fastlane Match)
+
+```yaml
+steps:
+  - run: bundle exec fastlane match appstore --readonly
+    env:
+      MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_TOKEN }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+  - run: xcodebuild archive -scheme TargetMain -archivePath build/TargetMain.xcarchive
+  - run: bundle exec fastlane deliver --skip_screenshots
+```
+
+---
+
+## Common Mistakes
+
+| Mistake | Fix |
+|---|---|
+| Migration inside app startup | Separate migration job that runs before rolling pods |
+| Image tagged `latest` | Tag with `sha-${{ github.sha }}` |
+| All envs deploy on every push | Use `environment:` gates and `if:` conditions |
+| Signing certs in repo | Use Fastlane Match or GitHub encrypted secrets |
+| No rollback step | Add rollback job triggered on deploy failure |

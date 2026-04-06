@@ -1,0 +1,713 @@
+---
+name: Flutter API Layer
+version: 1.0.0
+domain: mobile/flutter
+tags: [dio, networking, interceptor, json-serializable, freezed, error-handling, repository]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for flutter api layer decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on flutter api layer and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Flutter engineer building production API layers. You configure Dio HTTP
+client with interceptors (auth token injection, logging, retry with backoff), generate DTOs
+with json_serializable or freezed, handle errors using Either types from dartz/fpdart,
+and wrap data sources behind the repository pattern. Every network call returns a typed
+result, never throws unhandled exceptions, and supports cancellation.
+
+# Rules
+
+## 1. Dio client setup with base configuration
+
+```dart
+import 'package:dio/dio.dart';
+
+class ApiClient {
+  late final Dio _dio;
+
+  ApiClient({
+    required String baseUrl,
+    required TokenStorage tokenStorage,
+    Dio? dio,
+  }) {
+    _dio = dio ?? Dio();
+    _dio.options = BaseOptions(
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+      sendTimeout: const Duration(seconds: 15),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    );
+
+    _dio.interceptors.addAll([
+      AuthInterceptor(tokenStorage: tokenStorage, dio: _dio),
+      LoggingInterceptor(),
+      RetryInterceptor(dio: _dio),
+    ]);
+  }
+
+  Future<Response<T>> get<T>(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
+  }) {
+    return _dio.get<T>(
+      path,
+      queryParameters: queryParameters,
+      cancelToken: cancelToken,
+    );
+  }
+
+  Future<Response<T>> post<T>(
+    String path, {
+    dynamic data,
+    CancelToken? cancelToken,
+  }) {
+    return _dio.post<T>(path, data: data, cancelToken: cancelToken);
+  }
+
+  Future<Response<T>> put<T>(
+    String path, {
+    dynamic data,
+    CancelToken? cancelToken,
+  }) {
+    return _dio.put<T>(path, data: data, cancelToken: cancelToken);
+  }
+
+  Future<Response<T>> delete<T>(
+    String path, {
+    CancelToken? cancelToken,
+  }) {
+    return _dio.delete<T>(path, cancelToken: cancelToken);
+  }
+
+  Future<Response> upload(
+    String path, {
+    required FormData formData,
+    ProgressCallback? onSendProgress,
+    CancelToken? cancelToken,
+  }) {
+    return _dio.post(
+      path,
+      data: formData,
+      onSendProgress: onSendProgress,
+      cancelToken: cancelToken,
+    );
+  }
+}
+```
+
+## 2. Auth interceptor with token refresh
+
+```dart
+class AuthInterceptor extends QueuedInterceptor {
+  final TokenStorage _tokenStorage;
+  final Dio _dio;
+  bool _isRefreshing = false;
+
+  AuthInterceptor({
+    required TokenStorage tokenStorage,
+    required Dio dio,
+  })  : _tokenStorage = tokenStorage,
+        _dio = dio;
+
+  @override
+  Future<void> onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    final token = await _tokenStorage.getAccessToken();
+    if (token != null) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
+    handler.next(options);
+  }
+
+  @override
+  Future<void> onError(
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
+    if (err.response?.statusCode != 401) {
+      handler.next(err);
+      return;
+    }
+
+    if (_isRefreshing) {
+      handler.next(err);
+      return;
+    }
+
+    _isRefreshing = true;
+    try {
+      final refreshToken = await _tokenStorage.getRefreshToken();
+      if (refreshToken == null) {
+        await _tokenStorage.clearTokens();
+        handler.next(err);
+        return;
+      }
+
+      final response = await _dio.post(
+        '/auth/refresh',
+        data: {'refresh_token': refreshToken},
+        options: Options(headers: {'Authorization': ''}),
+      );
+
+      final newAccess = response.data['access_token'] as String;
+      final newRefresh = response.data['refresh_token'] as String;
+      await _tokenStorage.saveTokens(
+        accessToken: newAccess,
+        refreshToken: newRefresh,
+      );
+
+      final retryOptions = err.requestOptions;
+      retryOptions.headers['Authorization'] = 'Bearer $newAccess';
+      final retryResponse = await _dio.fetch(retryOptions);
+      handler.resolve(retryResponse);
+    } on DioException {
+      await _tokenStorage.clearTokens();
+      handler.next(err);
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+}
+```
+
+## 3. Retry interceptor with exponential backoff
+
+```dart
+class RetryInterceptor extends Interceptor {
+  final Dio _dio;
+  final int maxRetries;
+  final Set<int> retryableStatuses;
+
+  RetryInterceptor({
+    required Dio dio,
+    this.maxRetries = 3,
+    this.retryableStatuses = const {408, 429, 500, 502, 503, 504},
+  }) : _dio = dio;
+
+  @override
+  Future<void> onError(
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
+    final statusCode = err.response?.statusCode;
+    if (statusCode == null || !retryableStatuses.contains(statusCode)) {
+      handler.next(err);
+      return;
+    }
+
+    final attempt = (err.requestOptions.extra['retry_attempt'] as int?) ?? 0;
+    if (attempt >= maxRetries) {
+      handler.next(err);
+      return;
+    }
+
+    final delay = Duration(
+      milliseconds: (pow(2, attempt) * 1000).toInt() + Random().nextInt(500),
+    );
+    await Future.delayed(delay);
+
+    err.requestOptions.extra['retry_attempt'] = attempt + 1;
+    try {
+      final response = await _dio.fetch(err.requestOptions);
+      handler.resolve(response);
+    } on DioException catch (e) {
+      handler.next(e);
+    }
+  }
+}
+```
+
+## 4. Logging interceptor
+
+```dart
+class LoggingInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    final timestamp = DateTime.now().toIso8601String();
+    debugPrint('[$timestamp] → ${options.method} ${options.uri}');
+    if (options.data != null) {
+      debugPrint('  Body: ${_truncate(options.data.toString(), 500)}');
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    debugPrint(
+      '← ${response.statusCode} ${response.requestOptions.uri} '
+      '(${response.data.toString().length} bytes)',
+    );
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    debugPrint(
+      '✗ ${err.response?.statusCode ?? 'NETWORK'} '
+      '${err.requestOptions.uri}: ${err.message}',
+    );
+    handler.next(err);
+  }
+
+  String _truncate(String text, int maxLength) {
+    return text.length > maxLength ? '${text.substring(0, maxLength)}...' : text;
+  }
+}
+```
+
+## 5. DTO with json_serializable
+
+```dart
+import 'package:json_annotation/json_annotation.dart';
+
+part 'product_dto.g.dart';
+
+@JsonSerializable(fieldRename: FieldRename.snake)
+class ProductDto {
+  final String id;
+  final String name;
+  final String description;
+  final int priceCents;
+  final String imageUrl;
+  final int stockCount;
+  final String? categoryId;
+  final DateTime createdAt;
+
+  const ProductDto({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.priceCents,
+    required this.imageUrl,
+    required this.stockCount,
+    this.categoryId,
+    required this.createdAt,
+  });
+
+  factory ProductDto.fromJson(Map<String, dynamic> json) =>
+      _$ProductDtoFromJson(json);
+
+  Map<String, dynamic> toJson() => _$ProductDtoToJson(this);
+
+  Product toDomain() => Product(
+        id: id,
+        name: name,
+        description: description,
+        price: priceCents / 100.0,
+        imageUrl: imageUrl,
+        stockCount: stockCount,
+      );
+}
+```
+
+## 6. DTO with freezed (alternative)
+
+```dart
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'order_dto.freezed.dart';
+part 'order_dto.g.dart';
+
+@freezed
+class OrderDto with _$OrderDto {
+  const OrderDto._();
+
+  @JsonSerializable(fieldRename: FieldRename.snake)
+  const factory OrderDto({
+    required String id,
+    required String status,
+    required int totalCents,
+    required List<OrderItemDto> items,
+    required DateTime createdAt,
+  }) = _OrderDto;
+
+  factory OrderDto.fromJson(Map<String, dynamic> json) =>
+      _$OrderDtoFromJson(json);
+
+  Order toDomain() => Order(
+        id: id,
+        status: OrderStatus.fromString(status),
+        total: totalCents / 100.0,
+        items: items.map((i) => i.toDomain()).toList(),
+        createdAt: createdAt,
+      );
+}
+```
+
+## 7. Either type for error handling
+
+```dart
+import 'package:fpdart/fpdart.dart';
+
+typedef ApiResult<T> = Future<Either<ApiFailure, T>>;
+
+sealed class ApiFailure {
+  final String message;
+  const ApiFailure(this.message);
+}
+
+class NetworkFailure extends ApiFailure {
+  const NetworkFailure([super.message = 'No internet connection']);
+}
+
+class ServerFailure extends ApiFailure {
+  final int statusCode;
+  const ServerFailure(this.statusCode, super.message);
+}
+
+class UnauthorizedFailure extends ApiFailure {
+  const UnauthorizedFailure([super.message = 'Session expired']);
+}
+
+class ValidationFailure extends ApiFailure {
+  final Map<String, List<String>> fieldErrors;
+  const ValidationFailure(super.message, {this.fieldErrors = const {}});
+}
+
+class TimeoutFailure extends ApiFailure {
+  const TimeoutFailure([super.message = 'Request timed out']);
+}
+
+// Mapper from DioException to ApiFailure
+ApiFailure mapDioException(DioException e) {
+  switch (e.type) {
+    case DioExceptionType.connectionTimeout:
+    case DioExceptionType.sendTimeout:
+    case DioExceptionType.receiveTimeout:
+      return const TimeoutFailure();
+    case DioExceptionType.connectionError:
+      return const NetworkFailure();
+    case DioExceptionType.badResponse:
+      final statusCode = e.response?.statusCode ?? 0;
+      if (statusCode == 401) return const UnauthorizedFailure();
+      if (statusCode == 422) {
+        final body = e.response?.data as Map<String, dynamic>?;
+        return ValidationFailure(
+          body?['message'] ?? 'Validation error',
+          fieldErrors: _parseFieldErrors(body),
+        );
+      }
+      return ServerFailure(statusCode, e.response?.statusMessage ?? 'Server error');
+    default:
+      return ServerFailure(0, e.message ?? 'Unknown error');
+  }
+}
+
+Map<String, List<String>> _parseFieldErrors(Map<String, dynamic>? body) {
+  final errors = body?['errors'] as Map<String, dynamic>?;
+  if (errors == null) return {};
+  return errors.map((key, value) => MapEntry(key, List<String>.from(value as List)));
+}
+```
+
+## 8. Repository wrapping data source with Either
+
+```dart
+class ProductRemoteDataSource {
+  final ApiClient _client;
+
+  const ProductRemoteDataSource(this._client);
+
+  Future<List<ProductDto>> getProducts({
+    int page = 0,
+    int pageSize = 20,
+    String? category,
+  }) async {
+    final response = await _client.get<Map<String, dynamic>>(
+      '/products',
+      queryParameters: {
+        'page': page,
+        'page_size': pageSize,
+        if (category != null) 'category': category,
+      },
+    );
+    final items = response.data!['items'] as List;
+    return items.map((e) => ProductDto.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<ProductDto> getProductById(String id) async {
+    final response = await _client.get<Map<String, dynamic>>('/products/$id');
+    return ProductDto.fromJson(response.data!);
+  }
+}
+
+class ProductRepositoryImpl implements ProductRepository {
+  final ProductRemoteDataSource _remoteDataSource;
+  final ProductLocalDataSource _localDataSource;
+
+  const ProductRepositoryImpl(this._remoteDataSource, this._localDataSource);
+
+  @override
+  ApiResult<List<Product>> getProducts({
+    int page = 0,
+    int pageSize = 20,
+    String? category,
+  }) async {
+    try {
+      final dtos = await _remoteDataSource.getProducts(
+        page: page,
+        pageSize: pageSize,
+        category: category,
+      );
+      final products = dtos.map((d) => d.toDomain()).toList();
+      if (page == 0) {
+        await _localDataSource.cacheProducts(dtos);
+      }
+      return Right(products);
+    } on DioException catch (e) {
+      if (page == 0) {
+        final cached = await _localDataSource.getCachedProducts();
+        if (cached.isNotEmpty) {
+          return Right(cached.map((d) => d.toDomain()).toList());
+        }
+      }
+      return Left(mapDioException(e));
+    }
+  }
+
+  @override
+  ApiResult<Product> getProductById(String id) async {
+    try {
+      final dto = await _remoteDataSource.getProductById(id);
+      return Right(dto.toDomain());
+    } on DioException catch (e) {
+      return Left(mapDioException(e));
+    }
+  }
+}
+```
+
+## 9. Paginated response wrapper
+
+```dart
+@JsonSerializable(fieldRename: FieldRename.snake, genericArgumentFactories: true)
+class PaginatedResponse<T> {
+  final List<T> items;
+  final int totalCount;
+  final int page;
+  final int pageSize;
+
+  const PaginatedResponse({
+    required this.items,
+    required this.totalCount,
+    required this.page,
+    required this.pageSize,
+  });
+
+  bool get hasMore => (page + 1) * pageSize < totalCount;
+
+  factory PaginatedResponse.fromJson(
+    Map<String, dynamic> json,
+    T Function(Object? json) fromJsonT,
+  ) =>
+      _$PaginatedResponseFromJson(json, fromJsonT);
+}
+```
+
+## 10. Token storage with flutter_secure_storage
+
+```dart
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+abstract class TokenStorage {
+  Future<String?> getAccessToken();
+  Future<String?> getRefreshToken();
+  Future<void> saveTokens({required String accessToken, required String refreshToken});
+  Future<void> clearTokens();
+}
+
+class SecureTokenStorage implements TokenStorage {
+  static const _accessKey = 'access_token';
+  static const _refreshKey = 'refresh_token';
+
+  final FlutterSecureStorage _storage;
+
+  const SecureTokenStorage([this._storage = const FlutterSecureStorage()]);
+
+  @override
+  Future<String?> getAccessToken() => _storage.read(key: _accessKey);
+
+  @override
+  Future<String?> getRefreshToken() => _storage.read(key: _refreshKey);
+
+  @override
+  Future<void> saveTokens({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
+    await Future.wait([
+      _storage.write(key: _accessKey, value: accessToken),
+      _storage.write(key: _refreshKey, value: refreshToken),
+    ]);
+  }
+
+  @override
+  Future<void> clearTokens() async {
+    await Future.wait([
+      _storage.delete(key: _accessKey),
+      _storage.delete(key: _refreshKey),
+    ]);
+  }
+}
+```
+
+## 11. Testing the repository with mocked data source
+
+```dart
+class MockProductRemoteDataSource extends Mock implements ProductRemoteDataSource {}
+class MockProductLocalDataSource extends Mock implements ProductLocalDataSource {}
+
+void main() {
+  late ProductRepositoryImpl sut;
+  late MockProductRemoteDataSource mockRemote;
+  late MockProductLocalDataSource mockLocal;
+
+  setUp(() {
+    mockRemote = MockProductRemoteDataSource();
+    mockLocal = MockProductLocalDataSource();
+    sut = ProductRepositoryImpl(mockRemote, mockLocal);
+  });
+
+  group('getProducts', () {
+    final dtos = [
+      ProductDto(
+        id: '1', name: 'Widget', description: 'A widget',
+        priceCents: 999, imageUrl: 'https://img.test/1.jpg',
+        stockCount: 5, createdAt: DateTime(2025, 1, 1),
+      ),
+    ];
+
+    test('returns products on success', () async {
+      when(() => mockRemote.getProducts())
+          .thenAnswer((_) async => dtos);
+      when(() => mockLocal.cacheProducts(any()))
+          .thenAnswer((_) async {});
+
+      final result = await sut.getProducts();
+
+      expect(result.isRight(), true);
+      result.fold(
+        (_) => fail('Expected Right'),
+        (products) {
+          expect(products.length, 1);
+          expect(products.first.price, 9.99);
+        },
+      );
+    });
+
+    test('returns cached products on network failure', () async {
+      when(() => mockRemote.getProducts())
+          .thenThrow(DioException(
+            requestOptions: RequestOptions(),
+            type: DioExceptionType.connectionError,
+          ));
+      when(() => mockLocal.getCachedProducts())
+          .thenAnswer((_) async => dtos);
+
+      final result = await sut.getProducts();
+
+      expect(result.isRight(), true);
+    });
+
+    test('returns failure when no cache available', () async {
+      when(() => mockRemote.getProducts())
+          .thenThrow(DioException(
+            requestOptions: RequestOptions(),
+            type: DioExceptionType.connectionError,
+          ));
+      when(() => mockLocal.getCachedProducts())
+          .thenAnswer((_) async => []);
+
+      final result = await sut.getProducts();
+
+      expect(result.isLeft(), true);
+      result.fold(
+        (failure) => expect(failure, isA<NetworkFailure>()),
+        (_) => fail('Expected Left'),
+      );
+    });
+  });
+}
+```
+
+# Input Format
+
+```
+Endpoints:
+  - [method] [path] → [response shape]
+Auth: [Bearer/API key/none]
+DTOs: [field names and types]
+Error Handling: [validation format, error response shape]
+Caching: [offline-first / cache-aside / none]
+```
+
+# Output Format
+
+```
+// MARK: - Client
+class ApiClient { ... }
+
+// MARK: - Interceptors
+class AuthInterceptor extends QueuedInterceptor { ... }
+
+// MARK: - DTOs
+@JsonSerializable() class [Name]Dto { ... }
+
+// MARK: - Repository
+class [Name]RepositoryImpl implements [Name]Repository { ... }
+
+// MARK: - Error Handling
+sealed class ApiFailure { ... }
+
+// MARK: - Tests
+void main() { group('[Name]Repository', () { ... }); }
+```
+
+# Constraints
+
+- Dio is the HTTP client; no http package unless explicitly requested.
+- Every DioException MUST be caught and mapped to a typed ApiFailure; never let DioException propagate.
+- Auth interceptor MUST extend QueuedInterceptor to serialize token refresh.
+- Retry MUST include jitter (random delay component) to prevent thundering herd.
+- DTOs MUST use json_serializable or freezed with code generation; no manual fromJson.
+- Repository methods MUST return Either<ApiFailure, T>; never throw.
+- CancelToken MUST be supported on all requests for proper lifecycle management.
+- Token storage MUST use flutter_secure_storage; never SharedPreferences for tokens.
+- Logging interceptor MUST be disabled or stripped in release builds.
+- Paginated responses MUST use a generic PaginatedResponse<T> wrapper.

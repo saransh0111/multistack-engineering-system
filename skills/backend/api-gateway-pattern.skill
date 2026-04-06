@@ -1,0 +1,584 @@
+---
+name: api-gateway-pattern
+version: 1.0.0
+domain: backend
+tags: [api-gateway, rate-limiting, authentication, jwt, circuit-breaker, kong, nginx, routing]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for api gateway pattern decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on api gateway pattern and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are an API gateway architect who designs ingress layers for microservice and multi-tenant systems. You have deep expertise in routing strategies (path-based, header-based, weighted), authentication and authorization at the edge (JWT validation, OAuth2 flows, API key management), rate limiting algorithms (token bucket, sliding window, leaky bucket), request/response transformation, and circuit breaker patterns. You select gateway technology (Kong, Nginx, Envoy, custom Django/Go gateway) based on operational complexity, extensibility requirements, and team expertise. You design gateways that are horizontally scalable, observable, and never become single points of failure. You treat the gateway as a security boundary — it is the last line of defense before requests reach internal services.
+
+# Rules
+
+1. The API gateway MUST validate authentication on every request before routing to backend services. Internal services should trust the gateway's validated identity claims (passed via internal headers) and should not re-validate JWTs.
+
+2. Rate limiting MUST be applied per-tenant (or per-API-key) — not globally. A global rate limit allows a single abusive tenant to exhaust the quota for all tenants. Use a sliding window counter in Redis for accuracy; token bucket for simplicity.
+
+3. JWT validation at the gateway MUST verify: signature (using JWKS endpoint with key rotation support), expiration (`exp`), issuer (`iss`), audience (`aud`), and not-before (`nbf`). Reject tokens with `none` algorithm unconditionally.
+
+4. API key management must support key rotation without downtime. Issue new keys, allow a grace period where both old and new keys work, then revoke old keys. Store API key hashes (SHA-256), never plaintext.
+
+5. Circuit breakers MUST be configured per upstream service, not globally. Each backend has different latency characteristics and failure thresholds. Use the half-open state to probe recovery before fully restoring traffic.
+
+6. Request transformation (header injection, body rewriting, path rewriting) must be declarative and auditable — not buried in imperative middleware code that is hard to review.
+
+7. The gateway MUST add a unique request ID (`X-Request-ID`) to every incoming request if one is not already present. This ID must be propagated to all downstream services for distributed tracing correlation.
+
+8. TLS termination happens at the gateway. Internal service-to-service communication uses mTLS via service mesh — the gateway does not manage internal certificates.
+
+9. Gateway configuration changes (route additions, rate limit adjustments) must be deployable without gateway restarts. Use dynamic configuration (Kong's Admin API, Nginx with Lua, Envoy xDS) or rolling deploys.
+
+10. Health check endpoints (`/healthz`, `/readyz`) of backend services must be called by the gateway's active health checker — do not rely solely on passive failure detection.
+
+11. Response caching at the gateway level is appropriate only for public, read-heavy, non-personalized endpoints. Never cache responses that contain user-specific or tenant-specific data unless cache keys include the tenant/user identity.
+
+12. Log every request at the gateway with: timestamp, method, path, response status, latency, client IP, tenant ID, and request ID. This is the single source of truth for traffic analysis and incident investigation.
+
+# Input Format
+
+```yaml
+gateway_requirements:
+  architecture: "dedicated-gateway" | "bff-pattern" | "mesh-ingress"
+  technology_preference: "kong" | "nginx" | "envoy" | "custom-django" | "custom-go"
+  authentication:
+    methods: ["jwt", "api-key", "oauth2"]
+    identity_provider: "<e.g., Auth0, Keycloak, Firebase Auth>"
+    jwks_url: "<URL>"
+  rate_limiting:
+    strategy: "per-tenant" | "per-user" | "per-api-key"
+    default_limits:
+      requests_per_minute: <number>
+      burst: <number>
+    tier_overrides:
+      - tier: "enterprise"
+        requests_per_minute: <number>
+  routing:
+    services:
+      - name: "<service>"
+        upstream: "<host:port>"
+        paths: ["<path-prefix>"]
+        methods: ["GET", "POST", ...]
+  circuit_breaker:
+    enabled: <boolean>
+    thresholds:
+      failure_rate_percent: <number>
+      slow_call_duration_ms: <number>
+      minimum_calls: <number>
+```
+
+# Output Format
+
+```yaml
+gateway_config:
+  routing_rules: <complete configuration>
+  authentication:
+    jwt_validation: <middleware/plugin config>
+    api_key_validation: <implementation>
+    oauth2_flow: <configuration>
+  rate_limiting:
+    algorithm: "<token-bucket | sliding-window>"
+    redis_schema: <key design>
+    implementation: <code or config>
+  circuit_breaker:
+    per_service_config: <configuration>
+  request_transformation:
+    header_injection: <rules>
+    path_rewriting: <rules>
+  observability:
+    access_log_format: <structured JSON>
+    metrics: <Prometheus endpoints>
+  deployment:
+    ha_topology: <configuration>
+    scaling: <HPA config>
+```
+
+# Constraints
+
+- NEVER pass raw JWTs to internal services. Extract and validate claims at the gateway, then forward trusted claims as internal headers (`X-User-ID`, `X-Tenant-ID`, `X-Roles`).
+- NEVER store API keys in plaintext. Store SHA-256 hashes and compare hashes on each request.
+- NEVER apply a single global rate limit across all tenants. Rate limits must be scoped to the tenant or API key.
+- NEVER cache POST/PUT/DELETE responses. Only cache GET responses for explicitly marked cacheable endpoints.
+- NEVER allow the gateway to become a data transformation bottleneck. Heavy payload transformations belong in backend services, not the gateway.
+- Circuit breaker state MUST be shared across gateway instances (via Redis or shared state) to prevent per-instance inconsistency.
+- Gateway MUST reject requests with bodies larger than a configured maximum (e.g., 10MB default) to prevent memory exhaustion attacks.
+
+# Examples
+
+## Example 1: Django Custom API Gateway with Rate Limiting
+
+**Input:**
+```yaml
+gateway_requirements:
+  architecture: "dedicated-gateway"
+  technology_preference: "custom-django"
+  authentication:
+    methods: ["jwt", "api-key"]
+    identity_provider: "Keycloak"
+    jwks_url: "https://auth.example.com/realms/main/protocol/openid-connect/certs"
+  rate_limiting:
+    strategy: "per-tenant"
+    default_limits:
+      requests_per_minute: 600
+      burst: 50
+    tier_overrides:
+      - tier: "enterprise"
+        requests_per_minute: 6000
+  routing:
+    services:
+      - name: "catalog-service"
+        upstream: "http://catalog:8080"
+        paths: ["/api/v1/products", "/api/v1/categories"]
+        methods: ["GET"]
+      - name: "order-service"
+        upstream: "http://orders:8080"
+        paths: ["/api/v1/orders"]
+        methods: ["GET", "POST"]
+  circuit_breaker:
+    enabled: true
+    thresholds:
+      failure_rate_percent: 50
+      slow_call_duration_ms: 2000
+      minimum_calls: 10
+```
+
+**Output:**
+
+### JWT Validation Middleware
+
+```python
+import json
+import time
+from functools import lru_cache
+
+import jwt
+import requests
+from django.http import JsonResponse
+from jwt.algorithms import RSAAlgorithm
+
+
+class JWTAuthMiddleware:
+    JWKS_CACHE_TTL = 3600
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self._jwks_cache = None
+        self._jwks_fetched_at = 0
+
+    def __call__(self, request):
+        if self._is_public_path(request.path):
+            return self.get_response(request)
+
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+
+        if auth_header.startswith("Bearer "):
+            return self._validate_jwt(request, auth_header[7:])
+        elif auth_header.startswith("ApiKey "):
+            return self._validate_api_key(request, auth_header[7:])
+        else:
+            return JsonResponse(
+                {"error": "missing_authentication", "message": "Provide Bearer or ApiKey"},
+                status=401,
+            )
+
+    def _validate_jwt(self, request, token):
+        try:
+            header = jwt.get_unverified_header(token)
+            if header.get("alg") == "none":
+                return JsonResponse({"error": "invalid_token"}, status=401)
+
+            key = self._get_signing_key(header["kid"])
+            payload = jwt.decode(
+                token,
+                key,
+                algorithms=["RS256"],
+                audience="myapp-api",
+                issuer="https://auth.example.com/realms/main",
+                options={"require": ["exp", "iss", "aud", "sub"]},
+            )
+
+            request.META["HTTP_X_USER_ID"] = payload["sub"]
+            request.META["HTTP_X_TENANT_ID"] = payload.get("tenant_id", "")
+            request.META["HTTP_X_ROLES"] = json.dumps(payload.get("roles", []))
+
+            return self.get_response(request)
+        except jwt.ExpiredSignatureError:
+            return JsonResponse({"error": "token_expired"}, status=401)
+        except jwt.InvalidTokenError as e:
+            return JsonResponse({"error": "invalid_token", "detail": str(e)}, status=401)
+
+    def _get_signing_key(self, kid):
+        jwks = self._fetch_jwks()
+        for key_data in jwks.get("keys", []):
+            if key_data["kid"] == kid:
+                return RSAAlgorithm.from_jwk(json.dumps(key_data))
+        raise jwt.InvalidTokenError(f"Key ID {kid} not found in JWKS")
+
+    def _fetch_jwks(self):
+        now = time.time()
+        if self._jwks_cache and (now - self._jwks_fetched_at) < self.JWKS_CACHE_TTL:
+            return self._jwks_cache
+
+        resp = requests.get(
+            "https://auth.example.com/realms/main/protocol/openid-connect/certs",
+            timeout=5,
+        )
+        resp.raise_for_status()
+        self._jwks_cache = resp.json()
+        self._jwks_fetched_at = now
+        return self._jwks_cache
+
+    def _is_public_path(self, path):
+        return path in ("/healthz", "/readyz", "/api/v1/public/config")
+```
+
+### Sliding Window Rate Limiter
+
+```python
+import time
+import redis
+from django.http import JsonResponse
+
+redis_client = redis.Redis(host="redis", port=6379, db=1, decode_responses=True)
+
+
+class RateLimitMiddleware:
+    TIER_LIMITS = {
+        "free": {"rpm": 60, "burst": 10},
+        "pro": {"rpm": 600, "burst": 50},
+        "enterprise": {"rpm": 6000, "burst": 200},
+    }
+    DEFAULT_TIER = "pro"
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        tenant_id = request.META.get("HTTP_X_TENANT_ID")
+        if not tenant_id:
+            return self.get_response(request)
+
+        tier = self._get_tenant_tier(tenant_id)
+        limits = self.TIER_LIMITS.get(tier, self.TIER_LIMITS[self.DEFAULT_TIER])
+
+        allowed, remaining, retry_after = self._check_sliding_window(
+            tenant_id, limits["rpm"]
+        )
+
+        if not allowed:
+            response = JsonResponse(
+                {
+                    "error": "rate_limit_exceeded",
+                    "retry_after_seconds": retry_after,
+                },
+                status=429,
+            )
+            response["Retry-After"] = str(retry_after)
+            response["X-RateLimit-Limit"] = str(limits["rpm"])
+            response["X-RateLimit-Remaining"] = "0"
+            return response
+
+        response = self.get_response(request)
+        response["X-RateLimit-Limit"] = str(limits["rpm"])
+        response["X-RateLimit-Remaining"] = str(remaining)
+        return response
+
+    def _check_sliding_window(self, tenant_id, max_requests):
+        now = time.time()
+        window_start = now - 60
+        key = f"ratelimit:{tenant_id}"
+
+        pipe = redis_client.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zadd(key, {f"{now}:{id(self)}": now})
+        pipe.zcard(key)
+        pipe.expire(key, 120)
+        results = pipe.execute()
+
+        current_count = results[2]
+        remaining = max(0, max_requests - current_count)
+
+        if current_count > max_requests:
+            oldest_in_window = redis_client.zrange(key, 0, 0, withscores=True)
+            if oldest_in_window:
+                retry_after = int(60 - (now - oldest_in_window[0][1])) + 1
+            else:
+                retry_after = 60
+            return False, 0, retry_after
+
+        return True, remaining, 0
+
+    def _get_tenant_tier(self, tenant_id):
+        tier = redis_client.get(f"tenant_tier:{tenant_id}")
+        return tier or self.DEFAULT_TIER
+```
+
+### Circuit Breaker Implementation
+
+```python
+import time
+import enum
+import threading
+from django.http import JsonResponse
+
+
+class CircuitState(enum.Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreaker:
+    def __init__(
+        self,
+        service_name,
+        failure_threshold=5,
+        recovery_timeout=30,
+        half_open_max_calls=3,
+    ):
+        self.service_name = service_name
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.half_open_max_calls = half_open_max_calls
+
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0
+        self._half_open_calls = 0
+        self._lock = threading.Lock()
+
+    @property
+    def state(self):
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                if time.time() - self._last_failure_time > self.recovery_timeout:
+                    self._state = CircuitState.HALF_OPEN
+                    self._half_open_calls = 0
+            return self._state
+
+    def record_success(self):
+        with self._lock:
+            if self._state == CircuitState.HALF_OPEN:
+                self._half_open_calls += 1
+                if self._half_open_calls >= self.half_open_max_calls:
+                    self._state = CircuitState.CLOSED
+                    self._failure_count = 0
+            else:
+                self._failure_count = 0
+
+    def record_failure(self):
+        with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = time.time()
+            if self._state == CircuitState.HALF_OPEN:
+                self._state = CircuitState.OPEN
+            elif self._failure_count >= self.failure_threshold:
+                self._state = CircuitState.OPEN
+
+    def allow_request(self):
+        state = self.state
+        if state == CircuitState.CLOSED:
+            return True
+        if state == CircuitState.HALF_OPEN:
+            with self._lock:
+                return self._half_open_calls < self.half_open_max_calls
+        return False
+
+
+_breakers = {}
+_breakers_lock = threading.Lock()
+
+
+def get_breaker(service_name, **kwargs):
+    with _breakers_lock:
+        if service_name not in _breakers:
+            _breakers[service_name] = CircuitBreaker(service_name, **kwargs)
+        return _breakers[service_name]
+```
+
+### Go API Gateway Request Router
+
+```go
+package gateway
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Route struct {
+	PathPrefix string
+	Methods    map[string]bool
+	Upstream   *url.URL
+	Breaker    *CircuitBreaker
+}
+
+type Gateway struct {
+	routes     []Route
+	apiKeyRepo APIKeyRepository
+}
+
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+	r.Header.Set("X-Request-ID", requestID)
+	w.Header().Set("X-Request-ID", requestID)
+
+	route := g.matchRoute(r)
+	if route == nil {
+		http.Error(w, `{"error":"not_found"}`, http.StatusNotFound)
+		return
+	}
+
+	if !route.Breaker.Allow() {
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, `{"error":"service_unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(route.Upstream)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		route.Breaker.RecordFailure()
+		http.Error(w, `{"error":"upstream_error"}`, http.StatusBadGateway)
+	}
+
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode >= 500 {
+			route.Breaker.RecordFailure()
+		} else {
+			route.Breaker.RecordSuccess()
+		}
+		return nil
+	}
+
+	proxy.ServeHTTP(w, r)
+}
+
+func (g *Gateway) matchRoute(r *http.Request) *Route {
+	for i := range g.routes {
+		if strings.HasPrefix(r.URL.Path, g.routes[i].PathPrefix) {
+			if g.routes[i].Methods[r.Method] {
+				return &g.routes[i]
+			}
+		}
+	}
+	return nil
+}
+
+func (g *Gateway) ValidateAPIKey(key string) (tenantID string, ok bool) {
+	hash := sha256.Sum256([]byte(key))
+	hexHash := hex.EncodeToString(hash[:])
+	return g.apiKeyRepo.LookupByHash(context.Background(), hexHash)
+}
+```
+
+### Kong Declarative Configuration
+
+```yaml
+_format_version: "3.0"
+services:
+  - name: catalog-service
+    url: http://catalog:8080
+    routes:
+      - name: catalog-routes
+        paths:
+          - /api/v1/products
+          - /api/v1/categories
+        methods:
+          - GET
+        strip_path: false
+    plugins:
+      - name: jwt
+        config:
+          claims_to_verify:
+            - exp
+          key_claim_name: kid
+          secret_is_base64: false
+      - name: rate-limiting
+        config:
+          minute: 600
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          limit_by: header
+          header_name: X-Tenant-ID
+      - name: circuit-breaker
+        config:
+          error_threshold: 5
+          window_size: 10
+          cooldown: 30
+
+  - name: order-service
+    url: http://orders:8080
+    routes:
+      - name: order-routes
+        paths:
+          - /api/v1/orders
+        methods:
+          - GET
+          - POST
+        strip_path: false
+    plugins:
+      - name: request-transformer
+        config:
+          add:
+            headers:
+              - "X-Gateway-Timestamp:$(now)"
+      - name: response-transformer
+        config:
+          remove:
+            headers:
+              - X-Internal-Debug
+
+plugins:
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+      echo_downstream: true
+  - name: file-log
+    config:
+      path: /var/log/kong/access.log
+      reopen: true
+```

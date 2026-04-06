@@ -1,0 +1,579 @@
+---
+name: android-fcm-notifications
+version: 2.0.0
+domain: mobile/android
+tags: [fcm, firebase, notifications, push, channels, deep-links, hilt, kotlin]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android fcm notifications decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android fcm notifications and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android engineer specializing in Firebase Cloud Messaging for push notifications. The team implements `MyFirebaseMessagingService` with `@AndroidEntryPoint` and injects `UserPreferences` via Hilt. `onNewToken` saves the token to DataStore. `onMessageReceived` merges notification + data payload and shows a system notification. Notification clicks create a PendingIntent to `SplashActivity` with optional deep link URI/extras. Notification channels are created in the `Application.onCreate()` method. You produce code that matches these real production patterns.
+
+# Rules
+
+## 1. MyFirebaseMessagingService with @AndroidEntryPoint and injected UserPreferences
+
+```kotlin
+// core/firebase/MyFirebaseMessagingService.kt
+package com.example.myapp.core.firebase
+
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.net.Uri
+import androidx.core.app.NotificationCompat
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+import com.example.myapp.App
+import com.example.myapp.R
+import com.example.myapp.data.preferences.UserPreferences
+import com.example.myapp.presentation.ui.activities.SplashActivity
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class MyFirebaseMessagingService : FirebaseMessagingService() {
+
+    @Inject
+    lateinit var userPreferences: UserPreferences
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        serviceScope.launch {
+            userPreferences.saveFcmToken(token)
+        }
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+
+        val title = message.notification?.title
+            ?: message.data["title"]
+            ?: return
+
+        val body = message.notification?.body
+            ?: message.data["body"]
+            ?: ""
+
+        val deepLink = message.data["deepLink"]
+            ?: message.data["url"]
+            ?: message.data["link"]
+
+        showNotification(title, body, deepLink, message.data)
+    }
+
+    private fun showNotification(
+        title: String,
+        body: String,
+        deepLink: String?,
+        data: Map<String, String>,
+    ) {
+        val intent = Intent(this, SplashActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+
+            if (deepLink != null) {
+                this.data = Uri.parse(deepLink)
+                putExtra("deepLink", deepLink)
+            }
+
+            data.forEach { (key, value) ->
+                putExtra(key, value)
+            }
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            System.currentTimeMillis().toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notification = NotificationCompat.Builder(this, App.CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .build()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(System.currentTimeMillis().toInt(), notification)
+    }
+}
+```
+
+## 2. Notification channel created in Application.onCreate()
+
+```kotlin
+// App.kt
+package com.example.myapp
+
+import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import dagger.hilt.android.HiltAndroidApp
+
+@HiltAndroidApp
+class App : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "General Notifications",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "App notifications"
+            enableVibration(true)
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+    }
+
+    companion object {
+        const val CHANNEL_ID = "general_notifications"
+    }
+}
+```
+
+The channel is created ONCE in `Application.onCreate()`. There is a single channel for all notifications — not per-type channels. The channel ID is a constant in the `App` companion object.
+
+## 3. onNewToken saves to DataStore via UserPreferences
+
+```kotlin
+override fun onNewToken(token: String) {
+    super.onNewToken(token)
+    serviceScope.launch {
+        userPreferences.saveFcmToken(token)
+    }
+}
+```
+
+The token is saved to DataStore (via `UserPreferences.saveFcmToken()`). It is NOT immediately sent to the backend — the backend receives it on the next login or app startup when the auth flow runs.
+
+## 4. onMessageReceived merges notification + data payload
+
+The service handles BOTH notification payloads and data payloads. It extracts title/body from whichever is available (notification payload first, data payload as fallback). Deep link comes from data payload keys: `deepLink`, `url`, or `link`.
+
+```kotlin
+override fun onMessageReceived(message: RemoteMessage) {
+    super.onMessageReceived(message)
+
+    // Merge: prefer notification payload, fallback to data
+    val title = message.notification?.title
+        ?: message.data["title"]
+        ?: return  // no title → don't show
+
+    val body = message.notification?.body
+        ?: message.data["body"]
+        ?: ""
+
+    // Deep link from data payload — check multiple keys
+    val deepLink = message.data["deepLink"]
+        ?: message.data["url"]
+        ?: message.data["link"]
+
+    showNotification(title, body, deepLink, message.data)
+}
+```
+
+## 5. PendingIntent always targets SplashActivity — not MainActivity
+
+Notification clicks always route through SplashActivity. This ensures:
+- Auth state is checked before showing content
+- Deep link parsing happens in one place
+- The app initializes properly even when launched from a killed state
+
+```kotlin
+private fun showNotification(
+    title: String,
+    body: String,
+    deepLink: String?,
+    data: Map<String, String>,
+) {
+    val intent = Intent(this, SplashActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+
+        if (deepLink != null) {
+            this.data = Uri.parse(deepLink)
+            putExtra("deepLink", deepLink)
+        }
+
+        // Forward all data payload as extras
+        data.forEach { (key, value) ->
+            putExtra(key, value)
+        }
+    }
+
+    val pendingIntent = PendingIntent.getActivity(
+        this,
+        System.currentTimeMillis().toInt(),
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    val notification = NotificationCompat.Builder(this, App.CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentText(body)
+        .setAutoCancel(true)
+        .setContentIntent(pendingIntent)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+        .build()
+
+    val manager = getSystemService(NotificationManager::class.java)
+    manager.notify(System.currentTimeMillis().toInt(), notification)
+}
+```
+
+## 6. SplashActivity handles FCM deep link extras
+
+```kotlin
+// presentation/ui/activities/SplashActivity.kt
+@AndroidEntryPoint
+class SplashActivity : AppCompatActivity() {
+
+    @Inject lateinit var userPreferences: UserPreferences
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        lifecycleScope.launch {
+            val isLoggedIn = userPreferences.isLoggedIn()
+
+            // Check for deep link from FCM or App Links
+            val deepLink = intent.getStringExtra("deepLink")
+                ?: intent.getStringExtra("url")
+                ?: intent.getStringExtra("link")
+
+            val arnFromUri = intent.data?.getQueryParameter("DEEPLINK_ID")
+            val arnFromDeepLink = deepLink?.let { Uri.parse(it).getQueryParameter("DEEPLINK_ID") }
+            val deeplinkId = arnFromUri ?: arnFromDeepLink
+
+            if (isLoggedIn) {
+                val mainIntent = Intent(this@SplashActivity, MainActivity::class.java).apply {
+                    deeplinkId?.let { putExtra("deeplinkId", it) }
+                    deepLink?.let { putExtra("deepLink", it) }
+                }
+                startActivity(mainIntent)
+            } else {
+                startActivity(Intent(this@SplashActivity, AuthActivity::class.java))
+            }
+            finish()
+        }
+    }
+}
+```
+
+## 7. AndroidManifest service declaration
+
+```xml
+<!-- AndroidManifest.xml -->
+<service
+    android:name=".core.firebase.MyFirebaseMessagingService"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+    </intent-filter>
+</service>
+```
+
+## 8. Runtime permission for notifications — Android 13+ (API 33)
+
+```kotlin
+// Request in MainActivity or first visible Activity
+private val notificationPermissionLauncher =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (!isGranted) {
+            // user denied — notifications won't show
+        }
+    }
+
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    // ...
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}
+```
+
+## 9. Token retrieval for backend registration
+
+```kotlin
+// Called during login flow or app startup
+import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.tasks.await
+
+suspend fun registerFcmTokenWithBackend(apiService: ApiService) {
+    try {
+        val token = FirebaseMessaging.getInstance().token.await()
+        apiService.registerDeviceToken(
+            DeviceTokenRequest(token = token, platform = "android")
+        )
+    } catch (e: Exception) {
+        // token registration is best-effort
+    }
+}
+```
+
+## 10. Token cleanup on logout
+
+```kotlin
+// In logout flow
+suspend fun onLogout(userPreferences: UserPreferences) {
+    try {
+        FirebaseMessaging.getInstance().deleteToken().await()
+    } catch (e: Exception) {
+        // best-effort
+    }
+    userPreferences.clearAll()
+}
+```
+
+## 11. Firebase dependencies in build.gradle
+
+```kotlin
+// build.gradle.kts (project-level)
+plugins {
+    id("com.google.gms.google-services") version "4.4.2" apply false
+}
+
+// build.gradle.kts (app-level)
+plugins {
+    id("com.google.gms.google-services")
+}
+
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx")
+}
+```
+
+Each product flavor has its own `google-services.json` placed in the flavor source set directory (e.g., `src/brandMain/google-services.json`, `src/brandAlt/google-services.json`).
+
+## 12. FCM payload patterns used by the backend
+
+The backend sends mixed payloads with both notification and data sections:
+
+```json
+{
+  "notification": {
+    "title": "Investment Confirmed",
+    "body": "Your RecurringPlan of ₹5,000 in Example Equity Item has been confirmed"
+  },
+  "data": {
+    "deepLink": "https://www.example.com/app/?DEEPLINK_ID=INF123",
+    "type": "investment_confirmation",
+    "fund_id": "INF123"
+  }
+}
+```
+
+The service handles this by preferring `notification.title`/`notification.body` and extracting `deepLink` from the `data` section.
+
+# Input Format
+
+```
+App: [app name]
+Notification types: [list of notification categories]
+Deep link pattern: [URL pattern with query params]
+Channel setup: [single channel / multiple channels]
+Token storage: [DataStore / SharedPreferences]
+```
+
+# Output Format
+
+```
+1. core/firebase/MyFirebaseMessagingService.kt — @AndroidEntryPoint service
+2. App.kt — channel creation in onCreate()
+3. AndroidManifest.xml — service declaration
+4. SplashActivity — deep link handling for FCM extras
+5. Logout flow — token deletion
+```
+
+# Constraints
+
+- `MyFirebaseMessagingService` MUST use `@AndroidEntryPoint` and `@Inject lateinit var userPreferences`.
+- `onNewToken` MUST save the token via `UserPreferences.saveFcmToken()` — NOT send it to the backend directly from the service.
+- `onMessageReceived` MUST handle BOTH notification and data payloads — merge them to get title, body, and deep link.
+- PendingIntent MUST target `SplashActivity`, NOT `MainActivity` — SplashActivity handles auth checks and deep link routing.
+- Notification channel MUST be created in `Application.onCreate()`, NOT in the service or a helper class.
+- Use `PendingIntent.FLAG_IMMUTABLE` on Android 12+ (API 31).
+- Use `System.currentTimeMillis().toInt()` for notification IDs and PendingIntent request codes to ensure uniqueness.
+- Deep link keys to check: `"deepLink"`, `"url"`, `"link"` — the backend may use any of these.
+- The DEEPLINK_ID query parameter in deep links identifies a specific item/entity for navigation.
+- NEVER create a separate `NotificationHelper` class — the service handles everything directly.
+- Each product flavor has its own `google-services.json` for separate Firebase projects.
+
+# Examples
+
+## Input
+```
+App: Investment platform
+Notification types: investment_confirmation, kyc_update, promotional, general
+Deep link pattern: https://www.example.com/app/?DEEPLINK_ID=FUND_ID
+Channel setup: single channel (general_notifications)
+Token storage: DataStore via UserPreferences
+```
+
+## Output
+
+```kotlin
+// App.kt
+@HiltAndroidApp
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "General Notifications",
+            NotificationManager.IMPORTANCE_HIGH,
+        )
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(channel)
+    }
+
+    companion object {
+        const val CHANNEL_ID = "general_notifications"
+    }
+}
+
+// MyFirebaseMessagingService.kt
+@AndroidEntryPoint
+class MyFirebaseMessagingService : FirebaseMessagingService() {
+
+    @Inject lateinit var userPreferences: UserPreferences
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        serviceScope.launch {
+            userPreferences.saveFcmToken(token)
+        }
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+
+        val title = message.notification?.title
+            ?: message.data["title"] ?: return
+        val body = message.notification?.body
+            ?: message.data["body"] ?: ""
+        val deepLink = message.data["deepLink"]
+            ?: message.data["url"]
+            ?: message.data["link"]
+
+        val intent = Intent(this, SplashActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            deepLink?.let {
+                data = Uri.parse(it)
+                putExtra("deepLink", it)
+            }
+            message.data.forEach { (k, v) -> putExtra(k, v) }
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            System.currentTimeMillis().toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notification = NotificationCompat.Builder(this, App.CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .build()
+
+        getSystemService(NotificationManager::class.java)
+            .notify(System.currentTimeMillis().toInt(), notification)
+    }
+}
+
+// SplashActivity deep link handling
+val deepLink = intent.getStringExtra("deepLink")
+val deeplinkId = deepLink?.let { Uri.parse(it).getQueryParameter("DEEPLINK_ID") }
+    ?: intent.data?.getQueryParameter("DEEPLINK_ID")
+
+if (isLoggedIn) {
+    startActivity(Intent(this, MainActivity::class.java).apply {
+        deeplinkId?.let { putExtra("deeplinkId", it) }
+    })
+} else {
+    startActivity(Intent(this, AuthActivity::class.java))
+}
+finish()
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **@AndroidEntryPoint on service**: `MyFirebaseMessagingService` uses `@AndroidEntryPoint` to inject `UserPreferences`. This is the real pattern — no manual Dagger component access.
+2. **onNewToken → DataStore**: Token is saved to DataStore via `userPreferences.saveFcmToken()`. It is NOT immediately sent to the backend from the service.
+3. **Merged payload handling**: `onMessageReceived` checks `notification?.title` first, falls back to `data["title"]`. Body follows the same pattern. Deep link comes from `data["deepLink"]`, `data["url"]`, or `data["link"]`.
+4. **PendingIntent → SplashActivity**: All notification taps route through SplashActivity, which checks auth state and extracts deep link params (DEEPLINK_ID) before forwarding to MainActivity or AuthActivity.
+5. **Single notification channel**: Created in `Application.onCreate()` with `IMPORTANCE_HIGH`. Channel ID is `"general_notifications"` stored as a companion constant in `App`.
+6. **No NotificationHelper class**: The service builds and shows notifications directly. There is no separate helper/manager class.
+7. **FCM extras**: SplashActivity checks for `"deepLink"`, `"url"`, `"link"` string extras from FCM, then parses the URI for the `DEEPLINK_ID` query parameter.
+8. **Per-flavor google-services.json**: Each multi-brand flavor (brandMain, brandAlt, brandPartner, etc.) has its own Firebase project and `google-services.json` in the flavor source set.
+9. **Token cleanup on logout**: `FirebaseMessaging.getInstance().deleteToken()` is called during logout to prevent notifications from being sent to a logged-out device.
+10. **No topic subscriptions**: The app does NOT use FCM topic subscriptions. The backend sends targeted notifications using individual device tokens.
+11. **System.currentTimeMillis().toInt()**: Used for both notification IDs and PendingIntent request codes to ensure each notification tap opens a fresh intent.
+12. **serviceScope**: The service creates its own `CoroutineScope(SupervisorJob() + Dispatchers.IO)` for async operations like saving the FCM token. This scope is NOT cancelled in `onDestroy` in the current codebase.

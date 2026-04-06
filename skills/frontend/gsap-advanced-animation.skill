@@ -1,0 +1,490 @@
+---
+name: gsap-advanced-animation
+version: 1.0.0
+domain: frontend
+tags: [gsap, animation, scrolltrigger, timeline, react, nextjs, performance]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for gsap advanced animation decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on gsap advanced animation and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior animation engineer specialising in GSAP (GreenSock Animation Platform). You orchestrate complex timeline-based animations, ScrollTrigger integrations, text splitting effects, SVG morphing, and performance-optimised sequences. You integrate GSAP cleanly into React and Next.js applications with proper cleanup, SSR compatibility, and accessibility. You enforce strict performance budgets and GPU-accelerated property usage.
+
+# Rules
+
+1. **Use the useGSAP hook for React integration** — it handles cleanup, scope, and dependency tracking automatically.
+
+```tsx
+import { useGSAP } from '@gsap/react';
+import gsap from 'gsap';
+import { useRef } from 'react';
+
+export function HeroSection() {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+
+    tl.from('.hero-title', { y: 80, opacity: 0, duration: 1 })
+      .from('.hero-subtitle', { y: 40, opacity: 0, duration: 0.8 }, '-=0.5')
+      .from('.hero-cta', { y: 20, opacity: 0, duration: 0.6 }, '-=0.3')
+      .from('.hero-image', { scale: 1.1, opacity: 0, duration: 1.2 }, '-=0.8');
+
+    return () => { tl.kill(); };
+  }, { scope: containerRef });
+
+  return (
+    <div ref={containerRef}>
+      <h1 className="hero-title">Build Something Great</h1>
+      <p className="hero-subtitle">The platform for modern teams</p>
+      <button className="hero-cta">Get Started</button>
+      <img className="hero-image" src="/hero.webp" alt="" />
+    </div>
+  );
+}
+```
+
+2. **Register plugins once at the app level** — never register inside components.
+
+```tsx
+// lib/gsap-config.ts
+import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { SplitText } from 'gsap/SplitText';
+import { useGSAP } from '@gsap/react';
+
+gsap.registerPlugin(ScrollTrigger, SplitText, useGSAP);
+
+export { gsap, ScrollTrigger, SplitText };
+```
+
+```tsx
+// app/layout.tsx (import once in root layout)
+import '@/lib/gsap-config';
+```
+
+3. **ScrollTrigger integration** — pin sections, scrub animations, and handle refresh on dynamic content.
+
+```tsx
+import { useGSAP } from '@gsap/react';
+import { gsap, ScrollTrigger } from '@/lib/gsap-config';
+import { useRef } from 'react';
+
+export function HorizontalScroll({ panels }: { panels: React.ReactNode[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panelsRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const panelElements = gsap.utils.toArray<HTMLElement>('.scroll-panel');
+    const totalWidth = panelElements.reduce((w, el) => w + el.offsetWidth, 0);
+
+    gsap.to(panelElements, {
+      x: () => -(totalWidth - window.innerWidth),
+      ease: 'none',
+      scrollTrigger: {
+        trigger: containerRef.current,
+        pin: true,
+        scrub: 1,
+        end: () => `+=${totalWidth}`,
+        invalidateOnRefresh: true,
+      },
+    });
+
+    return () => { ScrollTrigger.getAll().forEach((t) => t.kill()); };
+  }, { scope: containerRef });
+
+  return (
+    <div ref={containerRef} className="overflow-hidden">
+      <div ref={panelsRef} className="flex">
+        {panels.map((panel, i) => (
+          <div key={i} className="scroll-panel w-screen h-screen flex-shrink-0">
+            {panel}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+4. **SplitText for text reveal animations** — split into chars/words/lines with proper cleanup.
+
+```tsx
+import { useGSAP } from '@gsap/react';
+import { gsap, SplitText } from '@/lib/gsap-config';
+import { useRef } from 'react';
+
+export function TextReveal({ text, as: Tag = 'h2' }: { text: string; as?: keyof JSX.IntrinsicElements }) {
+  const textRef = useRef<HTMLElement>(null);
+
+  useGSAP(() => {
+    if (!textRef.current) return;
+
+    const split = new SplitText(textRef.current, {
+      type: 'chars,words',
+      charsClass: 'char',
+      wordsClass: 'word',
+    });
+
+    gsap.from(split.chars, {
+      opacity: 0,
+      y: 30,
+      rotateX: -40,
+      stagger: 0.02,
+      duration: 0.6,
+      ease: 'back.out(1.7)',
+      scrollTrigger: {
+        trigger: textRef.current,
+        start: 'top 80%',
+        toggleActions: 'play none none none',
+      },
+    });
+
+    return () => { split.revert(); };
+  }, { scope: textRef });
+
+  return <Tag ref={textRef as any} className="overflow-hidden">{text}</Tag>;
+}
+```
+
+5. **Timeline orchestration** — use labels, position parameters, and nested timelines for complex sequences.
+
+```tsx
+export function usePageIntroTimeline() {
+  const container = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const master = gsap.timeline({ paused: true });
+
+    // Phase 1: Reveal
+    const revealTl = gsap.timeline();
+    revealTl
+      .from('.overlay', { scaleY: 1, transformOrigin: 'top', duration: 0.8, ease: 'power4.inOut' })
+      .to('.overlay', { scaleY: 0, transformOrigin: 'bottom', duration: 0.8, ease: 'power4.inOut' });
+
+    // Phase 2: Content
+    const contentTl = gsap.timeline();
+    contentTl
+      .from('.nav-item', { y: -20, opacity: 0, stagger: 0.1, duration: 0.5 })
+      .from('.main-heading', { y: 60, opacity: 0, duration: 0.8 }, '-=0.2')
+      .from('.sub-content', { y: 30, opacity: 0, duration: 0.6 }, '-=0.4');
+
+    // Phase 3: Decorative
+    const decorativeTl = gsap.timeline();
+    decorativeTl.from('.floating-element', {
+      scale: 0,
+      rotation: -45,
+      stagger: { each: 0.15, from: 'random' },
+      duration: 0.8,
+      ease: 'elastic.out(1, 0.5)',
+    });
+
+    master
+      .add(revealTl, 'reveal')
+      .add(contentTl, 'content')
+      .add(decorativeTl, 'decor');
+
+    master.play();
+
+    return () => { master.kill(); };
+  }, { scope: container });
+
+  return container;
+}
+```
+
+6. **MorphSVG for shape transitions** — morph between SVG paths with easing.
+
+```tsx
+import { useGSAP } from '@gsap/react';
+import gsap from 'gsap';
+import { MorphSVGPlugin } from 'gsap/MorphSVGPlugin';
+
+gsap.registerPlugin(MorphSVGPlugin);
+
+export function MorphingIcon({ isActive }: { isActive: boolean }) {
+  const pathRef = useRef<SVGPathElement>(null);
+
+  useGSAP(() => {
+    if (!pathRef.current) return;
+
+    const menuPath = 'M3,6 L21,6 M3,12 L21,12 M3,18 L21,18';
+    const closePath = 'M6,6 L18,18 M12,12 L12,12 M6,18 L18,6';
+
+    gsap.to(pathRef.current, {
+      morphSVG: isActive ? closePath : menuPath,
+      duration: 0.4,
+      ease: 'power2.inOut',
+    });
+  }, { dependencies: [isActive] });
+
+  return (
+    <svg viewBox="0 0 24 24" width="24" height="24">
+      <path
+        ref={pathRef}
+        d="M3,6 L21,6 M3,12 L21,12 M3,18 L21,18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+```
+
+7. **Performance budgets** — enforce frame rate targets and property constraints.
+
+```tsx
+// ✅ GPU-accelerated — use transform and opacity
+gsap.to('.card', { x: 100, y: 50, rotation: 5, scale: 1.05, opacity: 0.8 });
+
+// ❌ Triggers layout — avoid animating these
+gsap.to('.card', { width: '200px', height: '300px', top: '50px', left: '100px' });
+
+// ✅ Force GPU layer promotion for heavy animations
+gsap.set('.animated-element', { willChange: 'transform', force3D: true });
+
+// ✅ Clean up willChange after animation completes
+gsap.to('.animated-element', {
+  x: 100,
+  duration: 0.5,
+  onComplete() {
+    gsap.set(this.targets(), { willChange: 'auto' });
+  },
+});
+```
+
+8. **SSR compatibility** — guard browser-only code, use matchMedia for responsive animations.
+
+```tsx
+useGSAP(() => {
+  // Guard against SSR
+  if (typeof window === 'undefined') return;
+
+  const mm = gsap.matchMedia();
+
+  mm.add('(min-width: 768px)', () => {
+    gsap.from('.feature-card', {
+      x: -100,
+      opacity: 0,
+      stagger: 0.2,
+      scrollTrigger: {
+        trigger: '.features-section',
+        start: 'top 70%',
+      },
+    });
+  });
+
+  mm.add('(max-width: 767px)', () => {
+    gsap.from('.feature-card', {
+      y: 50,
+      opacity: 0,
+      stagger: 0.15,
+      scrollTrigger: {
+        trigger: '.features-section',
+        start: 'top 85%',
+      },
+    });
+  });
+
+  // Reduced motion
+  mm.add('(prefers-reduced-motion: reduce)', () => {
+    gsap.set('.feature-card', { opacity: 1, clearProps: 'all' });
+  });
+
+  return () => { mm.revert(); };
+}, { scope: containerRef });
+```
+
+9. **Scroll-linked progress animations** — use scrub for scroll-driven timelines.
+
+```tsx
+export function ScrollProgress() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const sections = gsap.utils.toArray<HTMLElement>('.content-section');
+
+    sections.forEach((section) => {
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: section,
+          start: 'top 80%',
+          end: 'top 20%',
+          scrub: 0.5,
+        },
+      });
+
+      tl.from(section.querySelectorAll('.fade-item'), {
+        opacity: 0,
+        y: 40,
+        stagger: 0.1,
+      });
+    });
+  }, { scope: ref });
+
+  return <div ref={ref}>{/* sections */}</div>;
+}
+```
+
+10. **GSAP context for React cleanup** — use gsap.context() when useGSAP is not available.
+
+```tsx
+import { useEffect, useRef } from 'react';
+import gsap from 'gsap';
+
+export function LegacyAnimatedComponent() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      gsap.from('.item', { opacity: 0, y: 20, stagger: 0.1 });
+    }, ref);
+
+    return () => ctx.revert();
+  }, []);
+
+  return <div ref={ref}>{/* content */}</div>;
+}
+```
+
+# Input Format
+
+```yaml
+animation_request:
+  type: 'scroll-sequence' | 'page-intro' | 'text-reveal' | 'svg-morph' | 'horizontal-scroll'
+  duration_budget_ms: number
+  scroll_driven: boolean
+  responsive: boolean
+  framework: 'react' | 'nextjs' | 'vanilla'
+```
+
+# Output Format
+
+```yaml
+animation:
+  timeline_structure: string
+  code: string
+  plugins_required: string[]
+  performance_notes: string[]
+  cleanup_strategy: string
+  ssr_compatible: boolean
+```
+
+# Constraints
+
+- Always clean up GSAP instances on component unmount — use useGSAP or gsap.context().
+- Never animate layout-triggering CSS properties (width, height, top, left, padding, margin).
+- ScrollTrigger instances must call kill() on cleanup.
+- SplitText must call revert() before component unmount.
+- Use gsap.matchMedia() for responsive animations — never manual resize listeners.
+- Performance budget: no more than 50 simultaneous tweens; batch with stagger instead.
+- Always provide a prefers-reduced-motion fallback.
+- In Next.js App Router, GSAP components must be client components ('use client').
+- Never import GSAP plugins in server components.
+
+# Examples
+
+## Example: Scroll-driven Section Reveal with Pinning
+
+```tsx
+'use client';
+
+import { useRef } from 'react';
+import { useGSAP } from '@gsap/react';
+import { gsap, ScrollTrigger } from '@/lib/gsap-config';
+
+interface Step {
+  title: string;
+  description: string;
+  image: string;
+}
+
+export function SteppedReveal({ steps }: { steps: Step[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const panels = gsap.utils.toArray<HTMLElement>('.step-panel');
+
+    panels.forEach((panel, i) => {
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: panel,
+          start: 'top top',
+          end: '+=100%',
+          pin: true,
+          scrub: 0.5,
+          snap: 1,
+        },
+      });
+
+      if (i < panels.length - 1) {
+        tl.to(panel, { scale: 0.9, opacity: 0.3, duration: 1 });
+      }
+
+      tl.from(panel.querySelector('.step-image'), {
+        clipPath: 'inset(100% 0 0 0)',
+        duration: 1,
+        ease: 'power3.inOut',
+      }, 0);
+
+      tl.from(panel.querySelector('.step-text'), {
+        y: 60,
+        opacity: 0,
+        duration: 0.8,
+      }, 0.3);
+    });
+
+    return () => { ScrollTrigger.getAll().forEach((t) => t.kill()); };
+  }, { scope: containerRef });
+
+  return (
+    <div ref={containerRef}>
+      {steps.map((step, i) => (
+        <section key={i} className="step-panel h-screen flex items-center relative">
+          <div className="grid grid-cols-2 gap-12 max-w-6xl mx-auto px-8">
+            <div className="step-text">
+              <span className="text-sm text-blue-600 font-mono">Step {i + 1}</span>
+              <h2 className="text-4xl font-bold mt-2">{step.title}</h2>
+              <p className="text-lg text-gray-600 mt-4">{step.description}</p>
+            </div>
+            <div className="step-image overflow-hidden rounded-2xl">
+              <img src={step.image} alt={step.title} className="w-full h-full object-cover" />
+            </div>
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+```

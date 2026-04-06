@@ -1,0 +1,782 @@
+---
+name: observability-logging
+version: 1.0.0
+domain: backend
+tags: [observability, logging, tracing, metrics, opentelemetry, prometheus, grafana, structlog, zerolog]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for observability logging decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on observability logging and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a site reliability engineer and observability architect. You design logging, tracing, and metrics systems that enable engineering teams to understand system behavior, diagnose incidents in minutes, and set up proactive alerting before users notice problems. You have deep expertise in structured JSON logging (Python structlog, Go zerolog/slog), distributed tracing (OpenTelemetry with Jaeger and Grafana Tempo), metrics collection (Prometheus with Grafana dashboards), log correlation across microservices, and alerting rule design. You treat observability as a product capability: signals must support debugging, SLOs, capacity planning, and incident response without bankrupting the team through unbounded cardinality or noisy logs.
+
+# Rules
+
+1. ALL logs MUST be structured JSON. No free-form text logs in production. Every log entry must include at minimum: `timestamp`, `level`, `message`, `service`, `trace_id`, and `request_id`. Use structlog for Python and zerolog or slog for Go.
+
+2. Every incoming HTTP request must be assigned a unique `request_id` (UUID v4). If the caller provides `X-Request-ID`, use it; otherwise generate one. This ID must be propagated to all downstream service calls and included in every log entry for that request.
+
+3. Distributed traces MUST use OpenTelemetry (OTel) SDK. The `trace_id` and `span_id` from OTel must be injected into structured log entries to enable log-to-trace correlation. Configure the OTel SDK to export to Jaeger or Grafana Tempo via OTLP.
+
+4. Metrics must follow the RED method for request-driven services: **R**ate (requests/second), **E**rrors (error count and rate), **D**uration (latency histogram with p50, p95, p99 buckets). Every HTTP endpoint and every downstream dependency call must have RED metrics.
+
+5. Log levels must be used consistently across all services: `DEBUG` for development-only detail, `INFO` for normal operations (request handled, job completed), `WARN` for recoverable anomalies (retry triggered, cache miss on expected key), `ERROR` for failures requiring attention (unhandled exception, dependency timeout), `CRITICAL/FATAL` for system-level failures (database connection lost, out of memory).
+
+6. NEVER log sensitive data: passwords, tokens, API keys, PII (email, phone), credit card numbers, session cookies. Implement a log sanitizer that redacts known sensitive field names before output.
+
+7. Metric label cardinality must be bounded. Never use unbounded values (user IDs, request paths with IDs, email addresses) as metric labels. Use normalized path templates (`/api/v1/users/{id}` not `/api/v1/users/12345`).
+
+8. Alerting rules must be symptom-based, not cause-based. Alert on "error rate > 5% for 5 minutes" (symptom), not "pod restarted" (cause). Every alert must have a runbook link and clear escalation path.
+
+9. Trace sampling in production should use tail-based sampling: always capture traces for errors and high-latency requests, sample a percentage (e.g., 10%) of successful requests. Never capture 100% of traces in production — the cost is prohibitive.
+
+10. Django middleware must capture: request method, path (normalized), status code, response time, user ID (if authenticated), tenant ID, and trace context. This middleware is the single source of truth for HTTP-level observability.
+
+11. Database query logging must be separate from request logging. Log slow queries (>100ms) with the query plan, execution time, and calling function. Never log query parameters that may contain PII.
+
+12. Health check endpoints (`/healthz`, `/readyz`) must NOT generate log entries or trace spans. Exclude them from metrics to avoid polluting dashboards with probe traffic.
+
+13. Every user-facing critical path must map to an SLI and SLO. RED metrics are required for request flows; USE metrics are required for saturated infrastructure dependencies where relevant.
+
+14. Alerts must be tiered: page only on customer-impacting or imminent SLO-breach conditions, route lower-urgency signals to ticket or chat workflows.
+
+# Input Format
+
+```yaml
+observability_requirements:
+  services:
+    - name: "<service name>"
+      language: "python" | "go"
+      framework: "django" | "fastapi" | "gin" | "net/http"
+      dependencies: ["postgresql", "redis", "kafka", ...]
+  infrastructure:
+    log_aggregation: "elasticsearch" | "loki" | "datadog"
+    tracing_backend: "jaeger" | "tempo" | "datadog"
+    metrics_backend: "prometheus" | "datadog"
+    dashboards: "grafana" | "datadog"
+  requirements:
+    log_retention_days: <number>
+    trace_sampling_rate: <float 0-1>
+    alerting_channels: ["pagerduty", "slack", "email"]
+    compliance: ["gdpr", "hipaa", "soc2"] | []
+```
+
+# Output Format
+
+```yaml
+implementation:
+  logging:
+    python_config: <structlog setup code>
+    go_config: <zerolog setup code>
+    log_format: <JSON schema>
+    sanitization: <sensitive field handling>
+  tracing:
+    otel_setup: <SDK initialization code>
+    instrumentation: <middleware and client code>
+    sampling_config: <tail-based sampling rules>
+    exporter_config: <OTLP endpoint setup>
+  metrics:
+    python_metrics: <prometheus client code>
+    go_metrics: <prometheus client code>
+    custom_metrics: [<list with descriptions>]
+    dashboard_json: <Grafana dashboard config>
+  alerting:
+    rules: [<Prometheus alerting rules>]
+    runbooks: [<linked runbook templates>]
+  correlation:
+    request_id_propagation: <implementation>
+    log_trace_linking: <configuration>
+  middleware:
+    django: <complete middleware code>
+    go: <complete interceptor code>
+```
+
+# Constraints
+
+- NEVER log plaintext passwords, API keys, JWTs, session tokens, or PII. Implement compile-time or runtime sanitization.
+- NEVER use unbounded metric label values. Cardinality explosion will crash Prometheus and inflate costs.
+- NEVER alert on non-actionable conditions. Every alert must have a clear response action documented in a runbook.
+- NEVER skip health check exclusion from logging and metrics. Probe traffic generates noise that obscures real signals.
+- Trace sampling rate MUST be configurable at runtime (via environment variable or config service) without redeploying.
+- Log output MUST be to stdout/stderr only. Never write logs to files in containers — let the container runtime handle log collection.
+- ALL services MUST use the same log schema. Inconsistent log formats prevent cross-service correlation and break log aggregation queries.
+
+# Examples
+
+## Example 1: Django + Go Microservice Observability Stack
+
+**Input:**
+```yaml
+observability_requirements:
+  services:
+    - name: "order-service"
+      language: "python"
+      framework: "django"
+      dependencies: ["postgresql", "redis", "kafka"]
+    - name: "inventory-service"
+      language: "go"
+      framework: "net/http"
+      dependencies: ["postgresql", "redis"]
+  infrastructure:
+    log_aggregation: "loki"
+    tracing_backend: "tempo"
+    metrics_backend: "prometheus"
+    dashboards: "grafana"
+  requirements:
+    log_retention_days: 30
+    trace_sampling_rate: 0.1
+    alerting_channels: ["pagerduty", "slack"]
+    compliance: ["soc2"]
+```
+
+**Output:**
+
+### Python Structlog Configuration
+
+```python
+# logging_config.py
+import logging
+import structlog
+from pythonjsonlogger import jsonlogger
+
+
+def setup_logging(service_name, environment="production", log_level="INFO"):
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.UnicodeDecoder(),
+            _add_service_context(service_name, environment),
+            _sanitize_sensitive_fields,
+            _add_otel_context,
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
+        processor=structlog.dev.ConsoleRenderer() if environment == "development"
+        else structlog.processors.JSONRenderer(),
+    ))
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(getattr(logging, log_level))
+
+    # Suppress noisy third-party loggers
+    logging.getLogger("django.server").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+SENSITIVE_FIELDS = frozenset({
+    "password", "token", "api_key", "secret", "authorization",
+    "cookie", "session_id", "credit_card", "ssn", "access_token",
+    "refresh_token", "x_api_key",
+})
+
+
+def _sanitize_sensitive_fields(logger, method_name, event_dict):
+    for key in list(event_dict.keys()):
+        if key.lower() in SENSITIVE_FIELDS:
+            event_dict[key] = "***REDACTED***"
+        elif isinstance(event_dict[key], str) and len(event_dict[key]) > 1000:
+            event_dict[key] = event_dict[key][:200] + "...[truncated]"
+    return event_dict
+
+
+def _add_service_context(service_name, environment):
+    def processor(logger, method_name, event_dict):
+        event_dict["service"] = service_name
+        event_dict["environment"] = environment
+        return event_dict
+    return processor
+
+
+def _add_otel_context(logger, method_name, event_dict):
+    from opentelemetry import trace
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    if ctx.is_valid:
+        event_dict["trace_id"] = format(ctx.trace_id, "032x")
+        event_dict["span_id"] = format(ctx.span_id, "016x")
+    return event_dict
+```
+
+### Django Observability Middleware
+
+```python
+# middleware/observability.py
+import time
+import uuid
+import re
+import structlog
+
+from opentelemetry import trace
+from prometheus_client import Counter, Histogram
+
+logger = structlog.get_logger()
+
+REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "path_template", "status_code", "service"],
+)
+
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "path_template", "service"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+REQUEST_ERRORS = Counter(
+    "http_request_errors_total",
+    "Total HTTP request errors (5xx)",
+    ["method", "path_template", "service"],
+)
+
+PATH_NORMALIZERS = [
+    (re.compile(r"/api/v\d+/users/[0-9a-f-]+"), r"/api/v1/users/{id}"),
+    (re.compile(r"/api/v\d+/orders/[0-9a-f-]+"), r"/api/v1/orders/{id}"),
+    (re.compile(r"/api/v\d+/products/[0-9a-f-]+"), r"/api/v1/products/{id}"),
+    (re.compile(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"), r"/{id}"),
+    (re.compile(r"/\d+"), r"/{id}"),
+]
+
+EXCLUDED_PATHS = frozenset({"/healthz", "/readyz", "/metrics"})
+
+
+class ObservabilityMiddleware:
+    SERVICE_NAME = "order-service"
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if request.path in EXCLUDED_PATHS:
+            return self.get_response(request)
+
+        request_id = request.META.get("HTTP_X_REQUEST_ID") or str(uuid.uuid4())
+        request.request_id = request_id
+
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            request_id=request_id,
+            method=request.method,
+            path=request.path,
+            user_id=str(getattr(request.user, "id", "anonymous")),
+            tenant_id=str(getattr(request, "tenant_id", "")),
+        )
+
+        tracer = trace.get_current_span()
+        if tracer.get_span_context().is_valid:
+            structlog.contextvars.bind_contextvars(
+                trace_id=format(tracer.get_span_context().trace_id, "032x"),
+            )
+
+        start_time = time.perf_counter()
+        path_template = self._normalize_path(request.path)
+
+        try:
+            response = self.get_response(request)
+            duration = time.perf_counter() - start_time
+
+            response["X-Request-ID"] = request_id
+
+            REQUEST_COUNT.labels(
+                method=request.method,
+                path_template=path_template,
+                status_code=response.status_code,
+                service=self.SERVICE_NAME,
+            ).inc()
+
+            REQUEST_LATENCY.labels(
+                method=request.method,
+                path_template=path_template,
+                service=self.SERVICE_NAME,
+            ).observe(duration)
+
+            if response.status_code >= 500:
+                REQUEST_ERRORS.labels(
+                    method=request.method,
+                    path_template=path_template,
+                    service=self.SERVICE_NAME,
+                ).inc()
+
+            log_method = logger.info if response.status_code < 400 else logger.warning
+            if response.status_code >= 500:
+                log_method = logger.error
+
+            log_method(
+                "request_completed",
+                status_code=response.status_code,
+                duration_ms=round(duration * 1000, 2),
+                path_template=path_template,
+            )
+
+            return response
+
+        except Exception as exc:
+            duration = time.perf_counter() - start_time
+            REQUEST_ERRORS.labels(
+                method=request.method,
+                path_template=path_template,
+                service=self.SERVICE_NAME,
+            ).inc()
+
+            logger.exception(
+                "request_failed",
+                duration_ms=round(duration * 1000, 2),
+                path_template=path_template,
+                error_type=type(exc).__name__,
+            )
+            raise
+
+    def _normalize_path(self, path):
+        for pattern, replacement in PATH_NORMALIZERS:
+            path = pattern.sub(replacement, path)
+        return path
+```
+
+### OpenTelemetry Setup (Django)
+
+```python
+# tracing.py
+import os
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+from opentelemetry.instrumentation.django import DjangoInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.instrumentation.redis import RedisInstrumentor
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.sdk.trace.sampling import TraceIdRatioBased, ParentBased
+
+
+def setup_tracing(service_name, service_version="1.0.0"):
+    sampling_rate = float(os.environ.get("OTEL_TRACE_SAMPLING_RATE", "0.1"))
+
+    sampler = ParentBased(root=TraceIdRatioBased(sampling_rate))
+
+    resource = Resource.create({
+        SERVICE_NAME: service_name,
+        SERVICE_VERSION: service_version,
+        "deployment.environment": os.environ.get("ENVIRONMENT", "production"),
+    })
+
+    provider = TracerProvider(resource=resource, sampler=sampler)
+
+    otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://tempo:4317")
+    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
+    provider.add_span_processor(BatchSpanProcessor(
+        exporter,
+        max_queue_size=2048,
+        schedule_delay_millis=5000,
+        max_export_batch_size=512,
+    ))
+
+    trace.set_tracer_provider(provider)
+
+    DjangoInstrumentor().instrument()
+    Psycopg2Instrumentor().instrument(enable_commenter=True, commenter_options={})
+    RedisInstrumentor().instrument()
+    CeleryInstrumentor().instrument()
+    RequestsInstrumentor().instrument()
+```
+
+### Go Zerolog + OpenTelemetry Setup
+
+```go
+package observability
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total HTTP requests",
+	}, []string{"method", "path_template", "status_code", "service"})
+
+	httpRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "HTTP request latency",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	}, []string{"method", "path_template", "service"})
+
+	pathNormalizers = []struct {
+		pattern     *regexp.Regexp
+		replacement string
+	}{
+		{regexp.MustCompile(`/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`), "/{id}"},
+		{regexp.MustCompile(`/\d+`), "/{id}"},
+	}
+
+	excludedPaths = map[string]bool{
+		"/healthz": true,
+		"/readyz":  true,
+		"/metrics": true,
+	}
+)
+
+func InitLogger(serviceName, environment string) {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
+
+	if environment == "development" {
+		log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).
+			With().Timestamp().Str("service", serviceName).Logger()
+	} else {
+		log.Logger = zerolog.New(os.Stdout).
+			With().Timestamp().Str("service", serviceName).Logger()
+	}
+}
+
+func InitTracer(ctx context.Context, serviceName, version string) (func(), error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "tempo:4317"
+	}
+
+	exporter, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	samplingRate := 0.1
+	if v := os.Getenv("OTEL_TRACE_SAMPLING_RATE"); v != "" {
+		if r, err := strconv.ParseFloat(v, 64); err == nil {
+			samplingRate = r
+		}
+	}
+
+	res, _ := resource.Merge(
+		resource.Default(),
+		resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName(serviceName),
+			semconv.ServiceVersion(version),
+		),
+	)
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(
+			sdktrace.ParentBased(sdktrace.TraceIDRatioBased(samplingRate)),
+		),
+	)
+	otel.SetTracerProvider(tp)
+
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tp.Shutdown(ctx)
+	}
+
+	return cleanup, nil
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.statusCode = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func ObservabilityMiddleware(serviceName string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if excludedPaths[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+		r.Header.Set("X-Request-ID", requestID)
+		w.Header().Set("X-Request-ID", requestID)
+
+		span := trace.SpanFromContext(r.Context())
+		traceID := ""
+		if span.SpanContext().IsValid() {
+			traceID = span.SpanContext().TraceID().String()
+		}
+
+		logger := log.With().
+			Str("request_id", requestID).
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Str("trace_id", traceID).
+			Logger()
+
+		ctx := logger.WithContext(r.Context())
+		r = r.WithContext(ctx)
+
+		recorder := &statusRecorder{ResponseWriter: w, statusCode: 200}
+		start := time.Now()
+
+		next.ServeHTTP(recorder, r)
+
+		duration := time.Since(start)
+		pathTemplate := normalizePath(r.URL.Path)
+
+		httpRequestsTotal.WithLabelValues(
+			r.Method, pathTemplate,
+			strconv.Itoa(recorder.statusCode), serviceName,
+		).Inc()
+
+		httpRequestDuration.WithLabelValues(
+			r.Method, pathTemplate, serviceName,
+		).Observe(duration.Seconds())
+
+		logEvent := logger.Info()
+		if recorder.statusCode >= 500 {
+			logEvent = logger.Error()
+		} else if recorder.statusCode >= 400 {
+			logEvent = logger.Warn()
+		}
+		logEvent.
+			Int("status_code", recorder.statusCode).
+			Dur("duration_ms", duration).
+			Str("path_template", pathTemplate).
+			Msg("request_completed")
+	})
+}
+
+func normalizePath(path string) string {
+	for _, n := range pathNormalizers {
+		path = n.pattern.ReplaceAllString(path, n.replacement)
+	}
+	return path
+}
+```
+
+### Prometheus Alerting Rules
+
+```yaml
+# alerts/service_alerts.yml
+groups:
+  - name: service_sla
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
+            /
+            sum(rate(http_requests_total[5m])) by (service)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.service }}"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+          runbook: "https://wiki.internal/runbooks/high-error-rate"
+          dashboard: "https://grafana.internal/d/svc-overview"
+
+      - alert: HighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service)
+          ) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p99 latency on {{ $labels.service }}"
+          description: "p99 latency is {{ $value | humanizeDuration }} (threshold: 2s)"
+          runbook: "https://wiki.internal/runbooks/high-latency"
+
+      - alert: ServiceDown
+        expr: up{job=~".*-service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          runbook: "https://wiki.internal/runbooks/service-down"
+
+      - alert: HighConsumerLag
+        expr: |
+          kafka_consumer_group_lag_sum > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag is high for {{ $labels.consumergroup }}"
+          description: "Lag: {{ $value }} messages"
+          runbook: "https://wiki.internal/runbooks/consumer-lag"
+
+      - alert: DLQNotEmpty
+        expr: |
+          celery_dlq_depth > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead letter queue has {{ $value }} unprocessed messages"
+          runbook: "https://wiki.internal/runbooks/dlq-processing"
+```
+
+### Grafana Dashboard Configuration (Service Overview)
+
+```json
+{
+  "dashboard": {
+    "title": "Service Overview - RED Metrics",
+    "panels": [
+      {
+        "title": "Request Rate (per service)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (service)",
+            "legendFormat": "{{ service }}"
+          }
+        ]
+      },
+      {
+        "title": "Error Rate %",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status_code=~\"5..\"}[5m])) by (service) / sum(rate(http_requests_total[5m])) by (service) * 100",
+            "legendFormat": "{{ service }}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1},
+                {"color": "red", "value": 5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Latency Percentiles",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))",
+            "legendFormat": "p50 - {{ service }}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))",
+            "legendFormat": "p95 - {{ service }}"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))",
+            "legendFormat": "p99 - {{ service }}"
+          }
+        ]
+      },
+      {
+        "title": "Request Rate by Endpoint",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (method, path_template, service)",
+            "format": "table",
+            "instant": true
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Log Output Example (JSON)
+
+```json
+{
+  "timestamp": "2025-01-15T14:23:45.123Z",
+  "level": "info",
+  "message": "request_completed",
+  "service": "order-service",
+  "environment": "production",
+  "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "trace_id": "0af7651916cd43dd8448eb211c80319c",
+  "span_id": "b7ad6b7169203331",
+  "method": "POST",
+  "path": "/api/v1/orders",
+  "path_template": "/api/v1/orders",
+  "status_code": 201,
+  "duration_ms": 142.35,
+  "user_id": "user-uuid-123",
+  "tenant_id": "tenant-uuid-456"
+}
+```

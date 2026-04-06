@@ -1,0 +1,607 @@
+---
+name: android-navigation-component
+version: 2.0.0
+domain: mobile/android
+tags: [navigation, jetpack, multi-activity, navgraph, deep-links, safe-args, kotlin, xml]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android navigation component decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android navigation component and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android engineer specializing in Jetpack Navigation for Kotlin Android apps using XML Views. The app uses a MULTI-ACTIVITY architecture — NOT single-activity. There are dedicated activities for Splash, Auth, Main (with NavHost + bottom nav), WebView, Compliance, NoInternet, and AppLock. Each activity scope has its own XML nav graph. Navigation between activities uses explicit Intents. Navigation within an activity uses the Navigation Component with Safe Args. Deep links land on SplashActivity with intent filters. You produce code that matches this real multi-activity structure.
+
+# Rules
+
+## 1. Multi-activity architecture — NOT single-activity
+
+The app has multiple activities, each serving a distinct purpose:
+
+```kotlin
+// Activities in the app
+SplashActivity     // Launcher, deep link entry point, auth check
+AuthActivity       // Login, OTP, registration flows (auth_nav_graph.xml)
+MainActivity       // Primary content with NavHost + bottom nav (main_nav_graph.xml)
+WebViewActivity    // In-app browser for terms, policies, external links
+ComplianceActivity        // Compliance flow with its own nav graph (compliance_nav_graph.xml)
+NoInternetActivity // Shown when network is unavailable
+AppLockActivity    // PIN/biometric lock screen
+```
+
+## 2. Each activity scope has its own XML nav graph
+
+```xml
+<!-- res/navigation/splash_nav_graph.xml -->
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/splash_nav_graph"
+    app:startDestination="@id/splashFragment">
+
+    <fragment
+        android:id="@+id/splashFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.splash.SplashFragment"
+        android:label="Splash" />
+</navigation>
+```
+
+```xml
+<!-- res/navigation/auth_nav_graph.xml -->
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/auth_nav_graph"
+    app:startDestination="@id/loginFragment">
+
+    <fragment
+        android:id="@+id/loginFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.auth.LoginFragment"
+        android:label="Login">
+        <action
+            android:id="@+id/action_login_to_otp"
+            app:destination="@id/otpVerificationFragment" />
+        <action
+            android:id="@+id/action_login_to_register"
+            app:destination="@id/registerFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/otpVerificationFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.auth.OtpVerificationFragment"
+        android:label="OTP Verification">
+        <argument
+            android:name="phone"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/registerFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.auth.RegisterFragment"
+        android:label="Register" />
+</navigation>
+```
+
+```xml
+<!-- res/navigation/main_nav_graph.xml -->
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main_nav_graph"
+    app:startDestination="@id/homeFragment">
+
+    <fragment
+        android:id="@+id/homeFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.home.HomeFragment"
+        android:label="Home">
+        <action
+            android:id="@+id/action_home_to_fundDetail"
+            app:destination="@id/fundDetailFragment" />
+        <action
+            android:id="@+id/action_home_to_portfolioAnalysis"
+            app:destination="@id/portfolioAnalysisFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/fundDetailFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.items.FundDetailFragment"
+        android:label="Item Detail">
+        <argument
+            android:name="itemId"
+            app:argType="string" />
+        <argument
+            android:name="itemName"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/portfolioAnalysisFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.portfolioanalysis.PortfolioAnalysisFragment"
+        android:label="AccountSummary Analysis" />
+
+    <fragment
+        android:id="@+id/fundSearchFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.fundsearch.FundSearchFragment"
+        android:label="Item Search" />
+
+    <fragment
+        android:id="@+id/profileFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.profile.ProfileFragment"
+        android:label="Profile" />
+
+    <fragment
+        android:id="@+id/transactionsFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.transactions.TransactionsFragment"
+        android:label="Transactions">
+        <argument
+            android:name="itemId"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+    </fragment>
+</navigation>
+```
+
+```xml
+<!-- res/navigation/compliance_nav_graph.xml -->
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/compliance_nav_graph"
+    app:startDestination="@id/kycStepOneFragment">
+
+    <fragment
+        android:id="@+id/kycStepOneFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.compliance.KycStepOneFragment"
+        android:label="Verification Step 1">
+        <action
+            android:id="@+id/action_stepOne_to_stepTwo"
+            app:destination="@id/kycStepTwoFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/kycStepTwoFragment"
+        android:name="com.example.myapp.presentation.ui.fragments.compliance.KycStepTwoFragment"
+        android:label="Verification Step 2">
+        <argument
+            android:name="panNumber"
+            app:argType="string" />
+    </fragment>
+</navigation>
+```
+
+## 3. Safe Args for type-safe argument passing between fragments
+
+```kotlin
+// build.gradle.kts (project-level)
+plugins {
+    id("androidx.navigation.safeargs.kotlin") version "2.7.7" apply false
+}
+
+// build.gradle.kts (app-level)
+plugins {
+    id("androidx.navigation.safeargs.kotlin")
+}
+```
+
+```kotlin
+// Navigate with Safe Args — in HomeFragment
+val action = HomeFragmentDirections.actionHomeToFundDetail(
+    itemId = item.itemId,
+    itemName = item.itemName,
+)
+findNavController().navigate(action)
+
+// Receive in FundDetailFragment
+val args: FundDetailFragmentArgs by navArgs()
+val itemId = args.itemId
+val itemName = args.itemName
+```
+
+## 4. Cross-activity navigation uses explicit Intents
+
+```kotlin
+// SplashActivity → AuthActivity or MainActivity
+class SplashActivity : AppCompatActivity() {
+
+    @Inject lateinit var userPreferences: UserPreferences
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        lifecycleScope.launch {
+            val isLoggedIn = userPreferences.isLoggedIn()
+            if (isLoggedIn) {
+                startActivity(Intent(this@SplashActivity, MainActivity::class.java).apply {
+                    handleDeepLink(intent)?.let { deepLinkData ->
+                        putExtras(deepLinkData)
+                    }
+                })
+            } else {
+                startActivity(Intent(this@SplashActivity, AuthActivity::class.java))
+            }
+            finish()
+        }
+    }
+}
+```
+
+```kotlin
+// MainActivity → ComplianceActivity
+fun navigateToKyc() {
+    startActivity(Intent(this, ComplianceActivity::class.java))
+}
+
+// Any activity → WebViewActivity
+fun openWebView(url: String, title: String) {
+    startActivity(Intent(this, WebViewActivity::class.java).apply {
+        putExtra("url", url)
+        putExtra("title", title)
+    })
+}
+```
+
+## 5. MainActivity hosts NavHostFragment + BottomNavigationView
+
+```kotlin
+// presentation/ui/activities/MainActivity.kt
+package com.example.myapp.presentation.ui.activities
+
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.setupWithNavController
+import com.example.myapp.R
+import com.example.myapp.databinding.ActivityMainBinding
+import dagger.hilt.android.AndroidEntryPoint
+
+@AndroidEntryPoint
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityMainBinding
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        val navHostFragment = supportFragmentManager
+            .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
+        val navController = navHostFragment.navController
+
+        binding.bottomNavigation.setupWithNavController(navController)
+
+        handleDeepLinkExtras(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDeepLinkExtras(intent)
+    }
+
+    private fun handleDeepLinkExtras(intent: Intent) {
+        val deeplinkId = intent.getStringExtra("deeplinkId")
+        if (deeplinkId != null) {
+            val navHostFragment = supportFragmentManager
+                .findFragmentById(R.id.nav_host_fragment) as NavHostFragment
+            val navController = navHostFragment.navController
+            val bundle = Bundle().apply { putString("itemId", deeplinkId) }
+            navController.navigate(R.id.fundDetailFragment, bundle)
+        }
+    }
+}
+```
+
+```xml
+<!-- res/layout/activity_main.xml -->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/nav_host_fragment"
+        android:name="androidx.navigation.fragment.NavHostFragment"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:defaultNavHost="true"
+        app:navGraph="@navigation/main_nav_graph"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/bottom_navigation"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_navigation"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        app:menu="@menu/bottom_nav_menu"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+```
+
+## 6. Deep link handling via SplashActivity with DEEPLINK_ID params
+
+```xml
+<!-- AndroidManifest.xml -->
+<activity
+    android:name=".presentation.ui.activities.SplashActivity"
+    android:exported="true"
+    android:theme="@style/Theme.App.Splash">
+
+    <!-- Launcher intent -->
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+
+    <!-- Deep link intent filter -->
+    <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data
+            android:scheme="https"
+            android:host="www.example.com"
+            android:pathPrefix="/app/" />
+        <data
+            android:scheme="http"
+            android:host="www.example.com"
+            android:pathPrefix="/app/" />
+    </intent-filter>
+</activity>
+```
+
+```kotlin
+// Deep link handling in SplashActivity
+private fun handleDeepLink(intent: Intent): Bundle? {
+    val uri = intent.data ?: return null
+    val deeplinkId = uri.getQueryParameter("DEEPLINK_ID")
+
+    return if (deeplinkId != null) {
+        Bundle().apply { putString("deeplinkId", deeplinkId) }
+    } else {
+        null
+    }
+}
+```
+
+## 7. FCM deep link routing also goes through SplashActivity
+
+```kotlin
+// FCM notification creates PendingIntent to SplashActivity
+private fun createDeepLinkPendingIntent(data: Map<String, String>): PendingIntent {
+    val intent = Intent(context, SplashActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        data["deepLink"]?.let { putExtra("deepLink", it) }
+        data["url"]?.let { putExtra("url", it) }
+        data["link"]?.let { putExtra("link", it) }
+    }
+    return PendingIntent.getActivity(
+        context,
+        System.currentTimeMillis().toInt(),
+        intent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+}
+```
+
+```kotlin
+// SplashActivity handles FCM extras
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+
+    val deepLink = intent.getStringExtra("deepLink")
+        ?: intent.getStringExtra("url")
+        ?: intent.getStringExtra("link")
+
+    val deepLinkBundle = if (deepLink != null) {
+        val uri = Uri.parse(deepLink)
+        val deeplinkId = uri.getQueryParameter("DEEPLINK_ID")
+        Bundle().apply { deeplinkId?.let { putString("deeplinkId", it) } }
+    } else {
+        handleDeepLink(intent)
+    }
+
+    navigateToMainOrAuth(deepLinkBundle)
+}
+```
+
+## 8. Activity declarations in AndroidManifest
+
+```xml
+<!-- All activities declared in AndroidManifest.xml -->
+<activity android:name=".presentation.ui.activities.AuthActivity"
+    android:exported="false"
+    android:screenOrientation="portrait" />
+
+<activity android:name=".presentation.ui.activities.MainActivity"
+    android:exported="false"
+    android:screenOrientation="portrait"
+    android:launchMode="singleTop" />
+
+<activity android:name=".presentation.ui.activities.WebViewActivity"
+    android:exported="false" />
+
+<activity android:name=".presentation.ui.activities.ComplianceActivity"
+    android:exported="false"
+    android:screenOrientation="portrait" />
+
+<activity android:name=".presentation.ui.activities.NoInternetActivity"
+    android:exported="false"
+    android:screenOrientation="portrait" />
+
+<activity android:name=".presentation.ui.activities.AppLockActivity"
+    android:exported="false"
+    android:screenOrientation="portrait" />
+```
+
+## 9. savedStateHandle for cross-fragment data in NavController
+
+```kotlin
+// Setting a result from a destination fragment
+findNavController().previousBackStackEntry
+    ?.savedStateHandle
+    ?.set("selected_fund_id", itemId)
+findNavController().popBackStack()
+
+// Reading the result in the originating fragment
+findNavController().currentBackStackEntry
+    ?.savedStateHandle
+    ?.getLiveData<String>("selected_fund_id")
+    ?.observe(viewLifecycleOwner) { itemId ->
+        viewModel.loadFundDetail(itemId)
+    }
+```
+
+# Input Format
+
+```
+App type: multi-activity with XML nav graphs
+Activities: [list of activities and their purpose]
+Nav graphs: [which graph belongs to which activity]
+Deep links: [URL patterns and query params]
+Bottom navigation: [tabs and their fragment destinations]
+Cross-activity flows: [which flows span activities]
+```
+
+# Output Format
+
+```
+1. res/navigation/[scope]_nav_graph.xml — per-activity nav graph
+2. Activity classes with NavHostFragment setup
+3. AndroidManifest.xml — activity declarations + deep link intent filters
+4. Safe Args usage for fragment-to-fragment navigation
+5. Intent-based cross-activity navigation
+```
+
+# Constraints
+
+- This is a MULTI-ACTIVITY app. Do NOT generate single-activity architecture.
+- Navigation between activities uses explicit Intents with extras. Do NOT use NavController for cross-activity navigation.
+- Navigation within an activity uses Navigation Component with XML nav graphs and Safe Args.
+- Deep links always land on SplashActivity. SplashActivity decides whether to route to AuthActivity or MainActivity based on login state.
+- Deep link data (DEEPLINK_ID param, FCM extras) is forwarded to MainActivity via Intent extras, then to fragments via NavController bundle.
+- Safe Args plugin is used for type-safe fragment arguments. Always use `FragmentDirections` and `FragmentArgs`.
+- BottomNavigationView is set up via `setupWithNavController()` in MainActivity.
+- All nav graphs are XML-based. Do NOT generate Compose Navigation or type-safe route objects.
+- `autoVerify="true"` is set on deep link intent filters for App Links verification.
+
+# Examples
+
+## Input
+```
+App type: multi-activity with XML nav graphs
+Activities: SplashActivity (launcher), AuthActivity (login/register), MainActivity (main content)
+Nav graphs: splash_nav_graph, auth_nav_graph, main_nav_graph
+Deep links: https://www.example.com/app/?DEEPLINK_ID=123
+Bottom navigation: Home, Search, AccountSummary, Profile
+Cross-activity flows: Splash→Auth or Splash→Main, Main→Compliance, Main→WebView
+```
+
+## Output
+
+```xml
+<!-- res/navigation/main_nav_graph.xml -->
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main_nav_graph"
+    app:startDestination="@id/homeFragment">
+
+    <fragment android:id="@+id/homeFragment"
+        android:name=".presentation.ui.fragments.home.HomeFragment"
+        android:label="Home">
+        <action android:id="@+id/action_home_to_detail"
+            app:destination="@id/fundDetailFragment" />
+    </fragment>
+
+    <fragment android:id="@+id/searchFragment"
+        android:name=".presentation.ui.fragments.fundsearch.FundSearchFragment"
+        android:label="Search" />
+
+    <fragment android:id="@+id/portfolioFragment"
+        android:name=".presentation.ui.fragments.accountSummary.PortfolioFragment"
+        android:label="AccountSummary" />
+
+    <fragment android:id="@+id/profileFragment"
+        android:name=".presentation.ui.fragments.profile.ProfileFragment"
+        android:label="Profile" />
+
+    <fragment android:id="@+id/fundDetailFragment"
+        android:name=".presentation.ui.fragments.items.FundDetailFragment"
+        android:label="Item Detail">
+        <argument android:name="itemId" app:argType="string" />
+    </fragment>
+</navigation>
+```
+
+```kotlin
+@AndroidEntryPoint
+class SplashActivity : AppCompatActivity() {
+
+    @Inject lateinit var userPreferences: UserPreferences
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        lifecycleScope.launch {
+            val destination = if (userPreferences.isLoggedIn()) {
+                Intent(this@SplashActivity, MainActivity::class.java).apply {
+                    intent.data?.getQueryParameter("DEEPLINK_ID")?.let {
+                        putExtra("deeplinkId", it)
+                    }
+                }
+            } else {
+                Intent(this@SplashActivity, AuthActivity::class.java)
+            }
+            startActivity(destination)
+            finish()
+        }
+    }
+}
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **Multi-activity, not single-activity**: SplashActivity, AuthActivity, MainActivity, WebViewActivity, ComplianceActivity, NoInternetActivity, AppLockActivity. Each has a clear responsibility.
+2. **4 XML nav graphs**: `splash_nav_graph.xml`, `auth_nav_graph.xml`, `main_nav_graph.xml`, `compliance_nav_graph.xml`. Each is scoped to its host activity.
+3. **Safe Args enabled**: `androidx.navigation.safeargs.kotlin` plugin is applied. Fragments use `FragmentDirections` for navigation and `by navArgs()` for receiving arguments.
+4. **Deep links on SplashActivity**: Intent filter with `https`/`http` schemes, host matching the brand domain, `pathPrefix="/app/"`, and `autoVerify="true"`. The DEEPLINK_ID query parameter identifies a specific item/entity.
+5. **FCM deep links**: FCM notifications create PendingIntents to SplashActivity. The service checks for `deepLink`, `url`, or `link` extras and passes them through. SplashActivity parses the URI and extracts the DEEPLINK_ID.
+6. **MainActivity is singleTop**: `launchMode="singleTop"` prevents duplicate instances. `onNewIntent()` handles subsequent deep links when the activity is already running.
+7. **BottomNavigationView**: Connected to NavController via `setupWithNavController()`. Bottom nav items map to top-level fragments in `main_nav_graph.xml`.
+8. **Cross-activity with Intents**: Navigation between activities always uses `startActivity(Intent(...))`. Extras carry data (url, title, deeplinkId). No cross-activity NavController sharing.
+9. **Cross-fragment results**: `NavController.previousBackStackEntry.savedStateHandle` is used for passing results back between fragments (e.g., item picker returning a selected item ID).
+10. **Portrait locked**: Most activities have `android:screenOrientation="portrait"` in the manifest.

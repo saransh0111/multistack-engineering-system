@@ -1,0 +1,65 @@
+---
+name: config-management
+version: 2.0.0
+domain: backend
+description: Define configuration ownership, promotion rules, secret separation, and runtime reload patterns for distributed systems.
+tags: [backend, config, environment-management, secrets, runtime]
+---
+
+## Purpose
+Create a deterministic configuration model that separates code, config, and secrets without drift.
+
+## When to Use
+Use when systems span multiple environments, tenants, regions, or deployment targets with runtime-configurable behavior.
+
+## Input Format
+```yaml
+system:
+  services: string[]
+  environments: string[]
+  runtime_overrides: string[]
+requirements:
+  dynamic_reload: boolean
+  tenant_specific_config: boolean
+  compliance: "standard" | "regulated"
+```
+
+## Output Format
+```yaml
+config_model:
+  source_of_truth: string
+  hierarchy: string[]
+  secret_boundary: string
+delivery:
+  injection_method: string
+  validation: string
+change_control:
+  rollout: string
+  rollback: string
+```
+
+## Execution Logic
+1. Separate static application config, environment config, tenant config, and secrets.
+2. IF a value changes without deploy, place it in runtime config rather than source code.
+3. IF the value is sensitive, move it to secret management and reference it indirectly.
+4. Define config schema validation and startup failure behavior.
+5. Specify promotion, rollback, and auditability for config changes.
+
+## Rules
+1. One source of truth per config class.
+2. Fail fast on invalid config at startup or reload time.
+3. Version runtime config and track who changed it.
+4. Provide safe defaults only for non-sensitive, low-risk values.
+5. Keep tenant-specific overrides isolated and bounded by schema.
+
+## Constraints
+- Never store secrets in plain application config.
+- Never allow environment-specific behavior through ad hoc `if prod` code branches.
+- Never use mutable config without audit and rollback.
+
+## Examples
+Input: Django API with tenant branding, feature toggles, and per-region endpoints.
+Output: Git-backed non-secret config, Vault-backed secrets, typed validation, and staged rollout process.
+
+## Output Style
+Return a short config operating model with ownership, storage, and change workflow.

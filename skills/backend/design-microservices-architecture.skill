@@ -1,0 +1,77 @@
+---
+name: design-microservices-architecture
+version: 2.0.0
+domain: backend
+description: Design microservice architectures using DDD boundaries, async-first integration, operational ownership, and failure-aware distributed systems patterns.
+tags: [backend, microservices, ddd, hexagonal, async, system-design, scaling]
+---
+
+## Purpose
+Design service architectures that are justified by domain, scale, and team topology rather than by fashion.
+
+## When to Use
+Use when decomposing a monolith, designing a new distributed system, or evaluating whether microservices are even warranted.
+
+## Input Format
+```yaml
+system_context:
+  domain: string
+  current_architecture: "monolith" | "modular-monolith" | "partial-microservices" | "greenfield"
+  key_use_cases: string[]
+  team_size: number
+  traffic_profile:
+    rps_peak: number
+    latency_p99_budget_ms: number
+  constraints: string[]
+```
+
+## Output Format
+```yaml
+recommendation:
+  target_architecture: "modular-monolith" | "microservices" | "hybrid"
+  rationale: string
+service_map:
+  - name: string
+    bounded_context: string
+    responsibilities: string[]
+    data_ownership: string
+communication:
+  sync: string[]
+  async: string[]
+operating_model:
+  team_ownership: string[]
+  observability: string[]
+  deployment_model: string
+failure_design:
+  - scenario: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Start with domain boundaries, not deployment units.
+2. IF team size, scale, or domain complexity does not justify distribution, recommend a modular monolith.
+3. IF independent scaling, release cadence, or compliance boundaries clearly justify it, decompose into bounded contexts.
+4. Prefer async integration unless the caller truly cannot proceed without the response.
+5. For every proposed service, define data ownership, failure modes, observability, and operator burden.
+6. Return the smallest architecture that solves the real problem.
+
+## Rules
+1. Bounded contexts define service boundaries.
+2. Database ownership is exclusive per service boundary.
+3. Shared libraries are acceptable; shared runtime databases are not.
+4. Every synchronous dependency needs timeout, retry, and fallback semantics.
+5. Every event flow needs schema governance, DLQ handling, and replay.
+6. Team cognitive load matters as much as throughput.
+7. If a service cannot be clearly owned by one team, the boundary is wrong.
+
+## Constraints
+- Never recommend microservices only because the company is "scaling."
+- Never split by technical layers such as auth-service, utils-service, common-service without bounded-context justification.
+- Never omit migration sequencing from monolith to distributed topology.
+
+## Examples
+Input: regulated B2B platform with payments, invoicing, identity, and reporting.
+Output: hybrid plan with a modular core, isolated payment boundary, async reporting projection, and explicit migration order.
+
+## Output Style
+Return a decision memo with bounded contexts, communication model, and operating implications.

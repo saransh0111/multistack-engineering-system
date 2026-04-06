@@ -1,0 +1,64 @@
+---
+name: event-schema-design
+version: 2.0.0
+domain: messaging
+description: Design event contracts with versioning, field ownership, compatibility rules, and schema governance.
+tags: [messaging, events, schema, contracts, governance]
+---
+
+## Purpose
+Create event schemas that remain clear, evolvable, and safe for multiple consumers.
+
+## When to Use
+Use when defining or changing Kafka events, webhooks, queue payloads, or internal domain event contracts.
+
+## Input Format
+```yaml
+event:
+  name: string
+  producer: string
+  consumers: string[]
+  trigger: string
+requirements:
+  schema_format: "json" | "avro" | "protobuf"
+  compatibility: "backward" | "forward" | "full"
+  pii: boolean
+```
+
+## Output Format
+```yaml
+schema_contract:
+  envelope: string[]
+  payload_fields: string[]
+  compatibility_policy: string
+governance:
+  ownership: string
+  review_checks: string[]
+  deprecation_policy: string
+```
+
+## Execution Logic
+1. Separate transport envelope from business payload.
+2. Include event ID, occurred-at timestamp, producer, version, and correlation metadata.
+3. IF multiple consumers exist, optimize for compatibility and semantic clarity over producer convenience.
+4. IF PII is present, minimize fields and define retention and masking rules.
+5. Return schema fields, compatibility rules, and governance checks together.
+
+## Rules
+1. Events describe facts that happened, not commands.
+2. Field names must be stable and business-meaningful.
+3. Add new optional fields before removing old ones.
+4. Encode tenant and trace context when relevant.
+5. Register and validate schemas in CI.
+
+## Constraints
+- Never publish internal persistence models as event schemas.
+- Never overload one event type with multiple meanings.
+- Never omit ownership and version metadata.
+
+## Examples
+Input: `invoice.paid` event consumed by accounting, notifications, and analytics.
+Output: fact-based event schema with envelope metadata, limited PII, and backward-compatibility policy.
+
+## Output Style
+Return a short event contract with governance and compatibility notes.

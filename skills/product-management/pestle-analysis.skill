@@ -1,0 +1,62 @@
+---
+name: pestle-analysis
+version: 2.0.0
+domain: product-management
+description: Analyze political, economic, social, technological, legal, and environmental forces that affect strategy.
+tags: [product, strategy, pestle, market-analysis]
+---
+
+## Purpose
+Assess external macro forces that can alter product viability, speed, or risk.
+
+## When to Use
+Use during market entry, international expansion, sector analysis, or major strategic bets.
+
+## Input Format
+```yaml
+market:
+  geography: string[]
+  sector: string
+  product: string
+time_horizon:
+  years: number
+```
+
+## Output Format
+```yaml
+pestle:
+  political: string[]
+  economic: string[]
+  social: string[]
+  technological: string[]
+  legal: string[]
+  environmental: string[]
+implications:
+  opportunities: string[]
+  risks: string[]
+```
+
+## Execution Logic
+1. Scan each PESTLE dimension for high-impact forces.
+2. Filter noise and rank by strategic relevance.
+3. Translate macro factors into product implications.
+4. Return actionable risks and opportunity moves.
+
+## Rules
+1. Keep the analysis market-specific.
+2. Distinguish structural trends from short-term noise.
+3. Tie macro forces to product consequences.
+4. Prioritize the top impacts.
+5. End with strategic implications.
+
+## Constraints
+- Never produce generic textbook PESTLE lists.
+- Never ignore legal and regulatory exposure in sensitive sectors.
+- Never stop at description without implications.
+
+## Examples
+Input: fintech expansion into India and EU.
+Output: PESTLE with regulation, macro, and adoption implications.
+
+## Output Style
+Return a concise macro-risk and opportunity brief.

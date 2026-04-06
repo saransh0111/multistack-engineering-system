@@ -1,0 +1,127 @@
+---
+name: frontend-design-direction
+version: 2.0.0
+domain: frontend
+description: Choose visual direction, layout archetype, typography, palette, component tone, chart style, and motion profile for distinctive frontend work.
+tags: [frontend, design, ui, ux, brand, layout, typography, palette]
+---
+
+## Purpose
+Turn vague UI requests into a specific design direction that avoids generic output and gives the implementation team a usable visual brief.
+
+## When to Use
+Use when designing a new page, redesigning a product surface, defining a brand-aware UI system, or reviewing whether a frontend feels generic.
+
+## Input Format
+```yaml
+brief:
+  product_type: "marketing" | "dashboard" | "hybrid" | "commerce" | "editorial"
+  audience: string
+  brand_traits: string[]
+  content_density: "low" | "medium" | "high"
+requirements:
+  seo: boolean
+  data_visualization: boolean
+  motion_level: "none" | "subtle" | "expressive" | "cinematic"
+  accessibility_target: "AA" | "AAA"
+constraints:
+  existing_design_system: boolean
+  mobile_priority: boolean
+```
+
+## Output Format
+```yaml
+design_direction:
+  visual_archetype: string
+  emotional_goal: string
+  memorable_hook: string
+  layout_pattern: string
+  typography_pair: string[]
+  palette_strategy: string
+  key_effects: string[]
+  spacing_and_density: string
+  component_tone: string
+  motion_profile: string
+  anti_patterns: string[]
+page_plan:
+  section_patterns: string[]
+  chart_guidance: string[]
+  pre_delivery_checks: string[]
+industry_fit_notes: string[]
+anti_generic_guards:
+  - string
+```
+
+## Execution Logic
+1. Identify whether the surface is narrative, transactional, analytical, or mixed.
+2. Select one visual archetype instead of blending too many.
+3. Match typography and color to the archetype and audience.
+4. IF the page is dashboard-heavy, favor hierarchy, density, and chart readability over visual spectacle.
+5. IF the page is marketing-heavy, create at least one memorable visual hook through typography, contrast, layout, or motion.
+6. Select a concrete style family, palette mood, typography pairing, and section pattern set instead of vague "modern" output.
+7. Add industry-fit notes so the direction respects context such as fintech trust, healthcare calm, or developer-tool precision.
+8. Return anti-generic guards and explicit anti-patterns so implementation does not collapse back to default patterns.
+
+## Rules
+1. Every design direction must have a point of view.
+2. Reuse the established brand if one exists; otherwise create a clear visual archetype.
+3. Typography, layout, and motion must support the same story.
+4. Data visualizations must inherit the design system rather than look bolted on.
+5. Include one memorable hook: a layout move, a typographic gesture, a color decision, or a motion beat worth remembering.
+6. Pick a concrete section pattern for the page, not just a style adjective.
+7. Accessible, fast, and intentional beats trendy.
+8. Match implementation complexity to the design ambition.
+9. Industry context changes the acceptable design vocabulary.
+
+## Constraints
+- Never output "clean modern SaaS" as the final direction.
+- Never combine three unrelated visual archetypes in one page.
+- Never recommend motion that hides content or harms readability.
+- Never default to AI-fingerprint patterns like purple-on-white gradients, endless same-size cards, or generic developer-font shortcuts.
+
+## Style Library
+
+Use one of these style families when fitting:
+
+- Swiss modernism
+- Editorial grid
+- Hero-centric conversion
+- Trust-and-authority enterprise
+- Data-dense executive dashboard
+- Real-time monitoring operations
+- Neubrutalism
+- Organic biophilic
+- Luxury minimalism
+- Retro-futurism
+- Motion-driven storytelling
+- Technical monochrome-plus-accent
+- Soft UI evolution
+- Magazine narrative
+
+## Palette and Typography Heuristics
+
+- Finance, trust, enterprise:
+  - favor controlled palettes, tinted neutrals, restrained accent use, tabular numbers.
+- Wellness, editorial, luxury:
+  - favor warmer neutrals, serif display or high-character grotesk, softer contrast transitions.
+- Developer, infrastructure, analytics:
+  - avoid lazy monospace-overuse; use one disciplined grotesk plus mono accent where needed.
+- Youthful, creative, entertainment:
+  - allow stronger contrast, asymmetry, playful density, and more expressive motion.
+
+## Anti-Patterns
+
+- Overused fonts like `Inter`, `Roboto`, `Arial`, or default system stacks when there is no established brand reason.
+- Purple-to-blue gradients on white backgrounds as the primary identity.
+- Identical card grids with icon + heading + text repeated endlessly.
+- Decorative sparklines, glassmorphism, or glow used without purpose.
+- Centered-everything layouts with no pacing or asymmetry.
+- Big metric blocks used as a generic hero substitute.
+- Dark mode chosen just to look "cool" without fitting the context.
+
+## Examples
+Input: developer infrastructure landing page with trust-sensitive enterprise buyers.
+Output: technical archetype, strong grotesk typography, constrained cool palette, proof-first section pacing, subtle motion, and chart style rules.
+
+## Output Style
+Return a high-signal creative brief that implementation teams can actually build from.

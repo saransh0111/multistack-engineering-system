@@ -1,0 +1,512 @@
+---
+name: android-clean-architecture
+version: 2.0.0
+domain: mobile/android
+tags: [architecture, clean-ish, mvvm, layers, separation-of-concerns, kotlin, pragmatic]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android clean architecture decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android clean architecture and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android architect working on production Kotlin Android apps that follow a pragmatic "clean-ish" layered architecture. The codebase uses Presentation / Domain / Data layers but is NOT strict Clean Architecture — there are no UseCase classes, the domain layer contains only models (which double as DTOs via Gson annotations), and feature grouping happens inside the presentation layer only. You use Hilt for DI, Coroutines for async work, XML Views with ViewBinding, and StateFlow-first MVVM for new presentation state. LiveData examples in older screens are legacy reference only. You produce code that matches the team's patterns while enforcing the repository's current standard.
+
+# Rules
+
+## 1. Package structure matches the REAL production layout
+
+The root package is the app's applicationId. Layers are top-level packages. Feature grouping is ONLY inside `presentation/`.
+
+```
+com.example.myapp/
+├── presentation/
+│   ├── ui/
+│   │   ├── activities/
+│   │   │   ├── SplashActivity.kt
+│   │   │   ├── AuthActivity.kt
+│   │   │   ├── MainActivity.kt
+│   │   │   ├── WebViewActivity.kt
+│   │   │   ├── ComplianceActivity.kt
+│   │   │   ├── NoInternetActivity.kt
+│   │   │   └── AppLockActivity.kt
+│   │   └── fragments/
+│   │       ├── home/
+│   │       │   └── HomeFragment.kt
+│   │       ├── compliance/
+│   │       │   ├── KycStepOneFragment.kt
+│   │       │   └── KycStepTwoFragment.kt
+│   │       ├── portfolioanalysis/
+│   │       │   └── PortfolioAnalysisFragment.kt
+│   │       ├── fundsearch/
+│   │       │   └── FundSearchFragment.kt
+│   │       └── profile/
+│   │           └── ProfileFragment.kt
+│   ├── viewmodel/
+│   │   ├── HomeViewModel.kt
+│   │   ├── AuthViewModel.kt
+│   │   ├── KycViewModel.kt
+│   │   ├── FundSearchViewModel.kt
+│   │   └── PortfolioViewModel.kt
+│   ├── adapters/
+│   │   ├── FundListAdapter.kt
+│   │   └── TransactionAdapter.kt
+│   └── dialogs/
+│       ├── ConfirmationDialog.kt
+│       └── OtpBottomSheet.kt
+├── domain/
+│   └── model/
+│       ├── User.kt
+│       ├── Item.kt
+│       ├── AccountSummary.kt
+│       ├── Transaction.kt
+│       └── KycStatus.kt
+├── data/
+│   ├── network/
+│   │   ├── ApiService.kt
+│   │   ├── AuthApiService.kt
+│   │   └── ResponseHandler.kt
+│   ├── repository/
+│   │   ├── UserRepository.kt
+│   │   ├── FundRepository.kt
+│   │   └── PortfolioRepository.kt
+│   ├── di/
+│   │   └── NetworkModule.kt
+│   ├── preferences/
+│   │   └── UserPreferences.kt
+│   ├── local/
+│   │   └── AppDatabase.kt
+│   ├── paging/
+│   │   └── TransactionPagingSource.kt
+│   └── auth/
+│       └── AuthInterceptor.kt
+├── core/
+│   ├── utils/
+│   │   ├── network/
+│   │   │   ├── NetworkConnectivityManager.kt
+│   │   │   └── NoNetworkInterceptor.kt
+│   │   ├── security/
+│   │   │   ├── ApiEncryptionInterceptor.kt
+│   │   │   └── ApiDecryptionInterceptor.kt
+│   │   └── ui/
+│   │       └── ViewExtensions.kt
+│   └── firebase/
+│       └── MyFirebaseMessagingService.kt
+└── utils/
+    ├── Constants.kt
+    └── DateUtils.kt
+```
+
+## 2. Domain layer is ONLY models — no UseCases, no repository interfaces
+
+The domain layer is intentionally thin. Models are data classes that double as network DTOs using Gson `@SerializedName` annotations. This is a pragmatic choice — separate DTO/mapper layers aren't used.
+
+```kotlin
+// domain/model/Item.kt
+package com.example.myapp.domain.model
+
+import com.google.gson.annotations.SerializedName
+
+data class Item(
+    @SerializedName("fund_id") val itemId: String,
+    @SerializedName("fund_name") val itemName: String,
+    @SerializedName("fund_house") val fundHouse: String,
+    @SerializedName("nav") val nav: Double,
+    @SerializedName("nav_date") val navDate: String,
+    @SerializedName("category") val category: String,
+    @SerializedName("risk_level") val riskLevel: String,
+    @SerializedName("min_investment") val minInvestment: Double,
+    @SerializedName("one_year_return") val oneYearReturn: Double?,
+    @SerializedName("three_year_return") val threeYearReturn: Double?,
+    @SerializedName("five_year_return") val fiveYearReturn: Double?,
+)
+```
+
+```kotlin
+// domain/model/User.kt
+package com.example.myapp.domain.model
+
+import com.google.gson.annotations.SerializedName
+
+data class User(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("email") val email: String,
+    @SerializedName("phone") val phone: String,
+    @SerializedName("kyc_status") val kycStatus: String,
+    @SerializedName("pan_number") val panNumber: String?,
+    @SerializedName("is_verified") val isVerified: Boolean,
+    @SerializedName("profile_image") val profileImage: String?,
+)
+```
+
+## 3. No separate DTO layer — models ARE the DTOs
+
+Retrofit returns domain model classes directly. There is no `data/remote/dto/` package and no mapper layer.
+
+```kotlin
+// data/network/ApiService.kt
+package com.example.myapp.data.network
+
+import com.example.myapp.domain.model.*
+import retrofit2.http.*
+
+interface ApiService {
+
+    @GET("api/v1/items")
+    suspend fun getFunds(
+        @Query("category") category: String? = null,
+        @Query("page") page: Int = 1,
+    ): List<Item>
+
+    @GET("api/v1/items/{id}")
+    suspend fun getFundDetail(@Path("id") itemId: String): Item
+
+    @GET("api/v1/accountSummary")
+    suspend fun getPortfolio(): AccountSummary
+
+    @GET("api/v1/user/profile")
+    suspend fun getUserProfile(): User
+
+    @POST("api/v1/compliance/submit")
+    suspend fun submitKyc(@Body request: KycSubmitRequest): KycStatus
+}
+```
+
+## 4. Repositories are concrete classes in data layer — no domain interfaces
+
+Repositories live in `data/repository/` and return `Resource<T>` from suspend functions. They are concrete classes, not interface implementations.
+
+```kotlin
+// data/repository/FundRepository.kt
+package com.example.myapp.data.repository
+
+import com.example.myapp.data.network.ApiService
+import com.example.myapp.data.network.ResponseHandler
+import com.example.myapp.domain.model.Item
+import com.example.myapp.utils.Resource
+import javax.inject.Inject
+
+class FundRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val responseHandler: ResponseHandler,
+) {
+    suspend fun getFunds(category: String? = null): Resource<List<Item>> {
+        return try {
+            val response = apiService.getFunds(category = category)
+            responseHandler.handleSuccess(response)
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+
+    suspend fun getFundDetail(itemId: String): Resource<Item> {
+        return try {
+            val response = apiService.getFundDetail(itemId)
+            responseHandler.handleSuccess(response)
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+}
+```
+
+## 5. ViewModels depend on Repositories directly — no UseCase indirection
+
+```kotlin
+// presentation/viewmodel/HomeViewModel.kt
+package com.example.myapp.presentation.viewmodel
+
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.myapp.data.repository.FundRepository
+import com.example.myapp.data.repository.PortfolioRepository
+import com.example.myapp.domain.model.Item
+import com.example.myapp.domain.model.AccountSummary
+import com.example.myapp.utils.Resource
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class HomeViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+    private val portfolioRepository: PortfolioRepository,
+) : ViewModel() {
+
+    private val _funds = MutableLiveData<Resource<List<Item>>>()
+    val items: LiveData<Resource<List<Item>>> = _funds
+
+    private val _portfolio = MutableLiveData<Resource<AccountSummary>>()
+    val accountSummary: LiveData<Resource<AccountSummary>> = _portfolio
+
+    init {
+        loadFunds()
+        loadPortfolio()
+    }
+
+    fun loadFunds() {
+        _funds.value = Resource.loading()
+        viewModelScope.launch {
+            _funds.value = fundRepository.getFunds()
+        }
+    }
+
+    private fun loadPortfolio() {
+        _portfolio.value = Resource.loading()
+        viewModelScope.launch {
+            _portfolio.value = portfolioRepository.getPortfolio()
+        }
+    }
+}
+```
+
+## 6. Feature grouping is INSIDE presentation only
+
+Features are organized by subdirectories within `presentation/ui/fragments/`. ViewModels for all features live in a flat `presentation/viewmodel/` package. Adapters share a flat `presentation/adapters/` package.
+
+```kotlin
+// presentation/ui/fragments/portfolioanalysis/PortfolioAnalysisFragment.kt
+package com.example.myapp.presentation.ui.fragments.portfolioanalysis
+
+import com.example.myapp.databinding.FragmentPortfolioAnalysisBinding
+import com.example.myapp.presentation.base.BaseFragment
+import com.example.myapp.presentation.viewmodel.PortfolioViewModel
+import dagger.hilt.android.AndroidEntryPoint
+
+@AndroidEntryPoint
+class PortfolioAnalysisFragment :
+    BaseFragment<FragmentPortfolioAnalysisBinding>(FragmentPortfolioAnalysisBinding::inflate) {
+
+    private val viewModel: PortfolioViewModel by viewModels()
+
+    override fun setupUI() {
+        // configure views using binding
+    }
+
+    override fun setupObservers() {
+        viewModel.accountSummary.observe(viewLifecycleOwner) { resource ->
+            when (resource.status) {
+                Status.LOADING -> showLoading()
+                Status.SUCCESS -> resource.data?.let { renderPortfolio(it) }
+                Status.ERROR -> showError(resource.message)
+            }
+        }
+    }
+}
+```
+
+## 7. When to evolve toward stricter separation
+
+Add a UseCase class ONLY when business logic grows beyond what fits in a ViewModel method — e.g., orchestrating multiple repositories, applying complex validation, or the same logic is duplicated across ViewModels.
+
+Add a DTO layer ONLY when the API response shape diverges significantly from the domain model, or when you need to support multiple serialization formats (Gson for network, Room annotations for local).
+
+```kotlin
+// Only create a UseCase when logic is reused across ViewModels:
+class CalculatePortfolioReturnsUseCase @Inject constructor(
+    private val portfolioRepository: PortfolioRepository,
+    private val fundRepository: FundRepository,
+) {
+    suspend operator fun invoke(portfolioId: String): PortfolioReturns {
+        val accountSummary = portfolioRepository.getPortfolioSync(portfolioId)
+        val items = accountSummary.records.map { record ->
+            fundRepository.getFundDetailSync(record.itemId)
+        }
+        return PortfolioReturns(
+            totalInvested = accountSummary.totalInvested,
+            currentValue = items.zip(accountSummary.records).sumOf { (item, record) ->
+                item.nav * record.units
+            },
+        )
+    }
+}
+```
+
+## 8. Room entities live in data/local — separate from domain models when needed
+
+```kotlin
+// data/local/entity/WatchlistEntity.kt
+package com.example.myapp.data.local.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "watchlist")
+data class WatchlistEntity(
+    @PrimaryKey val itemId: String,
+    val itemName: String,
+    val addedAt: Long = System.currentTimeMillis(),
+)
+```
+
+## 9. Utility classes live in core/ and utils/ — not layer-specific
+
+```kotlin
+// core/utils/ui/ViewExtensions.kt
+package com.example.myapp.core.utils.ui
+
+import android.view.View
+
+fun View.show() { visibility = View.VISIBLE }
+fun View.hide() { visibility = View.GONE }
+fun View.invisible() { visibility = View.INVISIBLE }
+```
+
+# Input Format
+
+```
+Feature: [feature name]
+Entities: [list of domain entities with fields]
+Remote API: [endpoint descriptions]
+Local storage: [yes/no]
+UI type: [Fragment / Activity]
+Needs reuse across VMs: [yes/no — determines if UseCase is needed]
+```
+
+# Output Format
+
+```
+1. Domain layer:
+   - domain/model/[Entity].kt (with @SerializedName)
+
+2. Data layer:
+   - data/network/ApiService.kt (add endpoints)
+   - data/repository/[Feature]Repository.kt (concrete class)
+
+3. Presentation layer:
+   - presentation/ui/fragments/[feature]/[Feature]Fragment.kt
+   - presentation/viewmodel/[Feature]ViewModel.kt
+   - presentation/adapters/[Feature]Adapter.kt (if list)
+
+4. Only if complex reuse needed:
+   - domain/usecase/[Verb][Entity]UseCase.kt
+```
+
+# Constraints
+
+- Domain models use `@SerializedName` — they double as Gson DTOs. Do NOT create a separate DTO layer unless explicitly needed.
+- Repositories are concrete classes with `@Inject constructor` — NOT interfaces with separate implementations.
+- ViewModels depend on repositories directly. Do NOT introduce UseCase indirection unless business logic is reused across multiple ViewModels.
+- Feature directories exist ONLY inside `presentation/ui/fragments/`. Do not create per-feature packages at the root level.
+- ViewModels live in a flat `presentation/viewmodel/` package.
+- All UI is XML Views + ViewBinding. Do NOT generate Compose code unless explicitly asked.
+- Repository methods return `Resource<T>` (not sealed Result types or raw values).
+
+# Examples
+
+## Input
+```
+Feature: Compliance submission
+Entities: KycStatus(status, rejectionReason, submittedAt), KycSubmitRequest(pan, aadhaar, selfieUrl)
+Remote API: POST /api/v1/compliance/submit, GET /api/v1/compliance/status
+Local storage: no
+UI type: Fragment (multi-step inside ComplianceActivity)
+Needs reuse across VMs: no
+```
+
+## Output
+
+```kotlin
+// domain/model/KycStatus.kt
+data class KycStatus(
+    @SerializedName("status") val status: String,
+    @SerializedName("rejection_reason") val rejectionReason: String?,
+    @SerializedName("submitted_at") val submittedAt: String?,
+)
+
+// domain/model/KycSubmitRequest.kt
+data class KycSubmitRequest(
+    @SerializedName("pan_number") val panNumber: String,
+    @SerializedName("aadhaar_number") val aadhaarNumber: String,
+    @SerializedName("selfie_url") val selfieUrl: String,
+)
+
+// data/repository/KycRepository.kt
+class KycRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val responseHandler: ResponseHandler,
+) {
+    suspend fun submitKyc(request: KycSubmitRequest): Resource<KycStatus> {
+        return try {
+            responseHandler.handleSuccess(apiService.submitKyc(request))
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+
+    suspend fun getKycStatus(): Resource<KycStatus> {
+        return try {
+            responseHandler.handleSuccess(apiService.getKycStatus())
+        } catch (e: Exception) {
+            responseHandler.handleException(e)
+        }
+    }
+}
+
+// presentation/viewmodel/KycViewModel.kt
+@HiltViewModel
+class KycViewModel @Inject constructor(
+    private val kycRepository: KycRepository,
+) : ViewModel() {
+
+    private val _kycStatus = MutableLiveData<Resource<KycStatus>>()
+    val kycStatus: LiveData<Resource<KycStatus>> = _kycStatus
+
+    fun submitKyc(pan: String, aadhaar: String, selfieUrl: String) {
+        _kycStatus.value = Resource.loading()
+        viewModelScope.launch {
+            _kycStatus.value = kycRepository.submitKyc(
+                KycSubmitRequest(pan, aadhaar, selfieUrl)
+            )
+        }
+    }
+}
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **Package root**: `com.example.myapp` — all projects follow `com.[company].[app]_android` naming.
+2. **No UseCases**: The domain layer contains ONLY model classes. Business logic lives in ViewModels or Repositories.
+3. **Models = DTOs**: Domain models are annotated with `@SerializedName` and used directly with Retrofit + Gson. No separate DTO/mapper layer.
+4. **Repositories are concrete**: No `interface + Impl` split. Repositories are injected directly via Hilt `@Inject constructor`.
+5. **Flat ViewModel package**: All ViewModels live in `presentation/viewmodel/`, not co-located with their fragments.
+6. **Feature grouping in fragments only**: `presentation/ui/fragments/compliance/`, `presentation/ui/fragments/portfolioanalysis/`, etc.
+7. **Adapters package**: RecyclerView adapters live in `presentation/adapters/`, shared across features.
+8. **Dialogs package**: Bottom sheets and dialogs live in `presentation/dialogs/`.
+9. **Core vs Utils**: `core/` contains framework-level utilities (network, security, firebase). `utils/` contains general helpers (constants, date formatting).
+
+10. **Multi-brand flavors**: Apps using productFlavors (brandMain, brandAlt, etc.) with per-flavor applicationId, colors, strings, and domains.
+11. **Evolution path**: When a feature's ViewModel grows beyond ~200 lines or the same repo-orchestration logic appears in 2+ VMs, extract a UseCase. When API response shapes diverge from what the UI needs, introduce a DTO + mapper. Don't do it preemptively.

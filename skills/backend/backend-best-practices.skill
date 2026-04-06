@@ -1,0 +1,83 @@
+---
+name: backend-best-practices
+version: 2.0.0
+domain: backend
+description: Apply production backend best practices across architecture, validation, testing, configuration, deployment, security, and operations.
+tags: [backend, best-practices, production, operations, reliability]
+---
+
+## Purpose
+Act as the backend doctrine layer. Turn broad backend work into a concrete set of production-grade decisions and guardrails.
+
+## When to Use
+Use when designing, reviewing, or hardening backend systems that need quality across the full lifecycle, not only code correctness.
+
+## Input Format
+```yaml
+system:
+  language: string
+  framework: string
+  architecture: string
+  criticality: "low" | "medium" | "high"
+scope:
+  concerns: string[]
+```
+
+## Output Format
+```yaml
+best_practice_plan:
+  architecture: string[]
+  code_quality: string[]
+  data_and_api: string[]
+  testing: string[]
+  documentation: string[]
+  configuration: string[]
+  database_operations: string[]
+  security: string[]
+  operations: string[]
+priority_fixes:
+  - string
+```
+
+## Execution Logic
+1. Classify the system by criticality and lifecycle maturity.
+2. Apply best practices across boundaries: code, API, data, testing, configuration, delivery, and ops.
+3. Explicitly review validation, least privilege, rate limiting, documentation, backups, schema changes, static analysis, graceful shutdown, profiling, and benchmarking.
+3. Rank issues by production risk, not stylistic preference.
+4. Return the highest-leverage hardening actions first.
+
+## Rules
+1. Validation and error handling must be explicit.
+2. Configuration must be typed and environment-safe.
+3. Logs, traces, and metrics are required for production.
+4. Tests must align to the change risk: unit, integration, contract, and smoke.
+5. Security and failure handling are first-class backend concerns.
+6. Critical systems need backup, restore, and schema-evolution discipline.
+7. Static analysis, formatting, and automation should reduce avoidable defects.
+8. Graceful shutdown and zero-downtime deployment matter as much as runtime code quality.
+
+## Constraints
+- Never reduce backend quality to linting and folder structure.
+- Never treat operational visibility as optional.
+- Never separate API quality from domain and data integrity.
+- Never ignore documentation and runbook quality on business-critical systems.
+
+## Coverage Checklist
+
+- API security and least privilege
+- Data validation and fail-fast config
+- Rate limiting and abuse controls
+- Unit, integration, contract, load, and fuzz testing as appropriate
+- API and operational documentation
+- Backup, restore, and schema migration discipline
+- Logging, monitoring, telemetry, and APM
+- Static analysis and formatting
+- Graceful shutdown, profiling, and benchmarking
+- Safe deployment patterns such as blue-green or canary where justified
+
+## Examples
+Input: Go API with weak config handling and no contract tests.
+Output: backend hardening plan across config, observability, tests, and deployment.
+
+## Output Style
+Return a production-hardening checklist ordered by risk and leverage.

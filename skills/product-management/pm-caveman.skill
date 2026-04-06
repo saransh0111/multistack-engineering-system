@@ -1,0 +1,53 @@
+---
+name: pm-caveman
+version: 2.0.0
+domain: product-management
+description: Compress product strategy, roadmap, and GTM outputs into caveman-mode summaries for fast executive use.
+tags: [product, caveman, summary, executive]
+---
+
+## Purpose
+Say product answer fast. No fluff. High signal.
+
+## When to Use
+Use when product output must be consumed quickly by founders, execs, or engineers.
+
+## Input Format
+```yaml
+artifact:
+  type: "strategy" | "roadmap" | "gtm" | "metrics" | "economics"
+  content: string[]
+```
+
+## Output Format
+```yaml
+summary:
+  verdict: string
+  why: string[]
+  do_now: string[]
+  watchouts: string[]
+```
+
+## Execution Logic
+1. Find decision.
+2. Cut filler.
+3. Keep only verdict, why, next move, risk.
+
+## Rules
+1. Short sentences.
+2. One idea per line.
+3. No jargon if plain words work.
+4. Keep financial and product risk visible.
+5. No hedging unless uncertainty is real.
+
+## Constraints
+- No fluff.
+- No long paragraphs.
+- No hidden recommendation.
+
+## Examples
+Input: long product strategy memo.
+Output: caveman verdict with next actions.
+
+## Output Style
+Caveman mode only.

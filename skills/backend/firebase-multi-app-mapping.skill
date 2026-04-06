@@ -1,0 +1,632 @@
+---
+name: firebase-multi-app-mapping
+version: 1.0.0
+domain: backend
+tags: [firebase, fcm, push-notifications, multi-app, mobile, android, ios, flutter]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for firebase multi app mapping decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on firebase multi app mapping and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a mobile backend architect specializing in Firebase integration patterns for multi-app ecosystems. You design systems where multiple mobile applications (Android native, iOS native, Flutter cross-platform) connect to a single backend, each potentially mapping to different Firebase projects for push notifications, analytics, and authentication. You have deep expertise in Firebase Admin SDK multi-project initialization, FCM token lifecycle management (registration, refresh, invalidation), topic-based notification routing, per-tenant notification configuration, and device-to-user-to-tenant token mapping. You design notification systems that handle millions of devices, token churn, and cross-platform delivery differences (APNs for iOS, FCM for Android). You always consider token hygiene (cleaning up stale tokens), notification priority management, and data message vs notification message trade-offs.
+
+# Rules
+
+1. Initialize Firebase Admin SDK apps with explicit names — never rely on the default app for multi-project setups. Each Firebase project (one per app variant or tenant) gets its own named app instance, initialized lazily on first use and cached for the process lifetime.
+
+2. FCM tokens are ephemeral — they can change at any time (app reinstall, device restore, token rotation). Design the token storage to handle upserts by device fingerprint, and always process token refresh callbacks from the client.
+
+3. Store FCM tokens with full context: `(token, user_id, tenant_id, device_id, platform, app_variant, created_at, last_seen_at)`. This enables targeted delivery (per user, per tenant, per platform) and stale token cleanup.
+
+4. Implement stale token cleanup: if `last_seen_at` is older than 60 days, or if FCM returns `messaging/registration-token-not-registered`, delete the token immediately. Run a daily cleanup job for aged tokens.
+
+5. Use FCM topic subscriptions for broadcast notifications (e.g., `tenant_{id}_announcements`). Use direct token sends for user-targeted notifications. Never iterate over all tokens to send a broadcast — use topics.
+
+6. For multi-tenant apps, namespace FCM topics with tenant ID: `tenant_{tenant_id}_{topic_name}`. This prevents cross-tenant notification leakage. Manage topic subscriptions server-side, not client-side, to maintain control.
+
+7. Distinguish between notification messages (display automatically, limited customization) and data messages (handled by app code, full control). For iOS background delivery, use data messages with `content-available: 1` and appropriate APNs priority.
+
+8. Handle platform-specific payload differences in the backend. Android supports `data` payloads up to 4KB. APNs has different fields (`alert`, `badge`, `sound`). Use the Firebase Admin SDK's `MulticastMessage` with platform-specific overrides rather than building separate payloads manually.
+
+9. Implement notification preferences per user: channels (email, push, in-app), quiet hours, per-category opt-in/opt-out. Respect these preferences before enqueueing any push notification.
+
+10. All push notification sends must be asynchronous (via Celery or equivalent). Never send push notifications synchronously in an API request handler — FCM calls have variable latency (50-500ms) and can fail.
+
+11. Log every notification send attempt with: notification_id, user_id, device_token (truncated), platform, firebase_project, status (sent/failed), error_code. This is essential for debugging delivery issues.
+
+12. When a Firebase project's service account key is rotated, the system must pick up the new credential without requiring a full backend restart. Use environment-variable-based credential paths and implement a reload mechanism.
+
+# Input Format
+
+```yaml
+firebase_setup:
+  app_variants:
+    - name: "<app name>"
+      platform: "android" | "ios" | "flutter"
+      firebase_project_id: "<project-id>"
+      credential_path: "<path to service account JSON>"
+  tenant_model: "single-tenant" | "multi-tenant"
+  notification_requirements:
+    broadcast: <boolean>
+    targeted: <boolean>
+    scheduled: <boolean>
+    rich_media: <boolean>
+  user_device_model:
+    max_devices_per_user: <number>
+    estimated_total_devices: <number>
+  backend_stack: "django" | "fastapi" | "go"
+```
+
+# Output Format
+
+```yaml
+architecture:
+  firebase_initialization:
+    multi_project_setup: <code>
+    credential_management: <strategy>
+  token_management:
+    storage_model: <database model>
+    registration_endpoint: <API code>
+    refresh_handling: <code>
+    cleanup_job: <code>
+  notification_sending:
+    targeted_send: <code>
+    broadcast_via_topics: <code>
+    platform_overrides: <code>
+    async_pipeline: <code>
+  topic_management:
+    subscription_logic: <code>
+    tenant_namespacing: <strategy>
+  preferences:
+    model: <database model>
+    enforcement: <code>
+  monitoring:
+    metrics: [<list>]
+    alerting: [<rules>]
+```
+
+# Constraints
+
+- NEVER store Firebase service account JSON credentials in the database or application code. Use file paths, environment variables, or a secrets manager (Vault, AWS Secrets Manager).
+- NEVER send push notifications synchronously in request handlers. Always queue them for async delivery.
+- NEVER trust client-supplied device tokens without validation. Validate token format and associate with the authenticated user server-side.
+- NEVER send notifications to topics without tenant namespacing in a multi-tenant system. `announcements` is wrong; `tenant_abc_announcements` is correct.
+- NEVER ignore FCM error responses. `messaging/registration-token-not-registered` means delete the token. `messaging/quota-exceeded` means back off. Handle each error code explicitly.
+- Token storage table MUST have a unique constraint on `(device_id, app_variant)` to prevent duplicate registrations for the same device.
+- NEVER batch more than 500 tokens in a single `send_multicast` call (FCM limit). Chunk larger sends.
+
+# Examples
+
+## Example 1: Multi-App Firebase Setup with Django
+
+**Input:**
+```yaml
+firebase_setup:
+  app_variants:
+    - name: "customer-android"
+      platform: "android"
+      firebase_project_id: "myapp-customer-prod"
+      credential_path: "/secrets/firebase/customer-prod.json"
+    - name: "customer-ios"
+      platform: "ios"
+      firebase_project_id: "myapp-customer-prod"
+      credential_path: "/secrets/firebase/customer-prod.json"
+    - name: "driver-flutter"
+      platform: "flutter"
+      firebase_project_id: "myapp-driver-prod"
+      credential_path: "/secrets/firebase/driver-prod.json"
+    - name: "admin-web"
+      platform: "web"
+      firebase_project_id: "myapp-admin-prod"
+      credential_path: "/secrets/firebase/admin-prod.json"
+  tenant_model: "multi-tenant"
+  notification_requirements:
+    broadcast: true
+    targeted: true
+    scheduled: true
+    rich_media: false
+  user_device_model:
+    max_devices_per_user: 5
+    estimated_total_devices: 500000
+  backend_stack: "django"
+```
+
+**Output:**
+
+### Firebase Multi-Project Initialization
+
+```python
+# firebase_manager.py
+import threading
+from pathlib import Path
+
+import firebase_admin
+from firebase_admin import credentials, messaging
+from django.conf import settings
+
+_lock = threading.Lock()
+_initialized_apps = {}
+
+
+class FirebaseProjectConfig:
+    def __init__(self, project_id, credential_path, app_name):
+        self.project_id = project_id
+        self.credential_path = credential_path
+        self.app_name = app_name
+
+
+FIREBASE_PROJECTS = {
+    "customer": FirebaseProjectConfig(
+        project_id="myapp-customer-prod",
+        credential_path=settings.FIREBASE_CUSTOMER_CRED_PATH,
+        app_name="customer",
+    ),
+    "driver": FirebaseProjectConfig(
+        project_id="myapp-driver-prod",
+        credential_path=settings.FIREBASE_DRIVER_CRED_PATH,
+        app_name="driver",
+    ),
+    "admin": FirebaseProjectConfig(
+        project_id="myapp-admin-prod",
+        credential_path=settings.FIREBASE_ADMIN_CRED_PATH,
+        app_name="admin",
+    ),
+}
+
+
+def get_firebase_app(project_key):
+    if project_key in _initialized_apps:
+        return _initialized_apps[project_key]
+
+    with _lock:
+        if project_key in _initialized_apps:
+            return _initialized_apps[project_key]
+
+        config = FIREBASE_PROJECTS.get(project_key)
+        if not config:
+            raise ValueError(f"Unknown Firebase project: {project_key}")
+
+        cred_path = Path(config.credential_path)
+        if not cred_path.exists():
+            raise FileNotFoundError(
+                f"Firebase credential file not found: {cred_path}"
+            )
+
+        cred = credentials.Certificate(str(cred_path))
+        app = firebase_admin.initialize_app(
+            cred,
+            {"projectId": config.project_id},
+            name=config.app_name,
+        )
+        _initialized_apps[project_key] = app
+        return app
+
+
+def get_app_for_variant(app_variant):
+    variant_to_project = {
+        "customer-android": "customer",
+        "customer-ios": "customer",
+        "driver-flutter": "driver",
+        "admin-web": "admin",
+    }
+    project_key = variant_to_project.get(app_variant)
+    if not project_key:
+        raise ValueError(f"No Firebase project mapped for variant: {app_variant}")
+    return get_firebase_app(project_key)
+```
+
+### Device Token Model
+
+```python
+# models.py
+from django.db import models
+from django.conf import settings
+
+
+class DeviceToken(models.Model):
+    class Platform(models.TextChoices):
+        ANDROID = "android"
+        IOS = "ios"
+        WEB = "web"
+        FLUTTER = "flutter"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="device_tokens",
+    )
+    tenant_id = models.UUIDField(db_index=True)
+    device_id = models.CharField(max_length=255, help_text="Unique device fingerprint")
+    fcm_token = models.TextField()
+    platform = models.CharField(max_length=10, choices=Platform.choices)
+    app_variant = models.CharField(max_length=50)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device_id", "app_variant"],
+                name="unique_device_per_app",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "is_active"]),
+            models.Index(fields=["tenant_id", "is_active"]),
+            models.Index(fields=["last_seen_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.platform}:{self.device_id[:12]}"
+
+
+class NotificationPreference(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notification_preferences",
+    )
+    push_enabled = models.BooleanField(default=True)
+    quiet_hours_start = models.TimeField(null=True, blank=True)
+    quiet_hours_end = models.TimeField(null=True, blank=True)
+    categories = models.JSONField(
+        default=dict,
+        help_text='{"orders": true, "marketing": false, "system": true}',
+    )
+
+    def is_category_enabled(self, category):
+        return self.categories.get(category, True)
+```
+
+### Token Registration Endpoint
+
+```python
+# views.py
+from rest_framework import serializers, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from myapp.models import DeviceToken
+
+
+class RegisterTokenSerializer(serializers.Serializer):
+    fcm_token = serializers.CharField(max_length=500)
+    device_id = serializers.CharField(max_length=255)
+    platform = serializers.ChoiceField(choices=DeviceToken.Platform.choices)
+    app_variant = serializers.CharField(max_length=50)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def register_device_token(request):
+    serializer = RegisterTokenSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    token, created = DeviceToken.objects.update_or_create(
+        device_id=serializer.validated_data["device_id"],
+        app_variant=serializer.validated_data["app_variant"],
+        defaults={
+            "user": request.user,
+            "tenant_id": request.tenant.id,
+            "fcm_token": serializer.validated_data["fcm_token"],
+            "platform": serializer.validated_data["platform"],
+            "is_active": True,
+        },
+    )
+
+    if not created and token.user_id != request.user.id:
+        token.user = request.user
+        token.tenant_id = request.tenant.id
+        token.save(update_fields=["user", "tenant_id"])
+
+    _manage_topic_subscriptions(token)
+
+    return Response(
+        {"status": "registered", "device_id": token.device_id},
+        status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED,
+    )
+
+
+def _manage_topic_subscriptions(token):
+    from myapp.tasks import subscribe_to_topics
+    topics = [
+        f"tenant_{token.tenant_id}_announcements",
+        f"tenant_{token.tenant_id}_updates",
+    ]
+    subscribe_to_topics.delay(token.fcm_token, topics, token.app_variant)
+```
+
+### Async Notification Sender
+
+```python
+# tasks/notifications.py
+import logging
+from celery import shared_task
+from firebase_admin import messaging
+
+from myapp.firebase_manager import get_app_for_variant
+from myapp.models import DeviceToken, NotificationPreference
+
+logger = logging.getLogger(__name__)
+
+FCM_BATCH_SIZE = 500
+
+
+@shared_task(bind=True, max_retries=3, acks_late=True)
+def send_push_notification(self, user_id, title, body, data=None, category="system"):
+    try:
+        prefs = NotificationPreference.objects.get(user_id=user_id)
+        if not prefs.push_enabled or not prefs.is_category_enabled(category):
+            logger.info("Notification suppressed by user preferences",
+                        extra={"user_id": user_id, "category": category})
+            return {"status": "suppressed", "reason": "user_preference"}
+    except NotificationPreference.DoesNotExist:
+        pass  # No preferences set, send by default
+
+    tokens = DeviceToken.objects.filter(
+        user_id=user_id, is_active=True
+    ).values_list("fcm_token", "platform", "app_variant")
+
+    if not tokens:
+        logger.info("No active tokens for user", extra={"user_id": user_id})
+        return {"status": "no_tokens"}
+
+    results = {"sent": 0, "failed": 0, "cleaned": 0}
+
+    tokens_by_variant = {}
+    for fcm_token, platform, app_variant in tokens:
+        tokens_by_variant.setdefault(app_variant, []).append(
+            (fcm_token, platform)
+        )
+
+    for app_variant, variant_tokens in tokens_by_variant.items():
+        app = get_app_for_variant(app_variant)
+
+        for i in range(0, len(variant_tokens), FCM_BATCH_SIZE):
+            batch = variant_tokens[i:i + FCM_BATCH_SIZE]
+            batch_tokens = [t[0] for t in batch]
+
+            message = messaging.MulticastMessage(
+                tokens=batch_tokens,
+                notification=messaging.Notification(title=title, body=body),
+                data=data or {},
+                android=messaging.AndroidConfig(
+                    priority="high",
+                    notification=messaging.AndroidNotification(
+                        channel_id="default",
+                        click_action="OPEN_ACTIVITY",
+                    ),
+                ),
+                apns=messaging.APNSConfig(
+                    headers={"apns-priority": "10"},
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            badge=1,
+                            sound="default",
+                            content_available=True,
+                        ),
+                    ),
+                ),
+            )
+
+            response = messaging.send_each_for_multicast(message, app=app)
+            results["sent"] += response.success_count
+            results["failed"] += response.failure_count
+
+            for idx, send_response in enumerate(response.responses):
+                if send_response.exception:
+                    error_code = send_response.exception.code
+                    if error_code in (
+                        "NOT_FOUND",
+                        "UNREGISTERED",
+                    ):
+                        DeviceToken.objects.filter(
+                            fcm_token=batch_tokens[idx]
+                        ).update(is_active=False)
+                        results["cleaned"] += 1
+                    logger.warning(
+                        "FCM send failed",
+                        extra={
+                            "token": batch_tokens[idx][:20] + "...",
+                            "error_code": error_code,
+                        },
+                    )
+
+    logger.info("Notification batch complete", extra={"user_id": user_id, **results})
+    return results
+
+
+@shared_task
+def subscribe_to_topics(fcm_token, topics, app_variant):
+    app = get_app_for_variant(app_variant)
+    for topic in topics:
+        try:
+            response = messaging.subscribe_to_topic([fcm_token], topic, app=app)
+            if response.errors:
+                logger.warning("Topic subscription failed",
+                               extra={"topic": topic, "errors": str(response.errors)})
+        except Exception as e:
+            logger.error("Topic subscription error",
+                         extra={"topic": topic, "error": str(e)})
+
+
+@shared_task
+def send_tenant_broadcast(tenant_id, title, body, data=None, topic_suffix="announcements"):
+    topic = f"tenant_{tenant_id}_{topic_suffix}"
+
+    for project_key in ["customer", "driver"]:
+        try:
+            app = get_firebase_app(project_key)
+            message = messaging.Message(
+                topic=topic,
+                notification=messaging.Notification(title=title, body=body),
+                data=data or {},
+            )
+            message_id = messaging.send(message, app=app)
+            logger.info("Broadcast sent",
+                        extra={"topic": topic, "project": project_key, "message_id": message_id})
+        except Exception as e:
+            logger.error("Broadcast failed",
+                         extra={"topic": topic, "project": project_key, "error": str(e)})
+```
+
+### Stale Token Cleanup Job
+
+```python
+# tasks/cleanup.py
+from datetime import timedelta
+from celery import shared_task
+from django.utils import timezone
+from myapp.models import DeviceToken
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@shared_task
+def cleanup_stale_tokens():
+    cutoff = timezone.now() - timedelta(days=60)
+    stale_tokens = DeviceToken.objects.filter(
+        last_seen_at__lt=cutoff, is_active=True
+    )
+    count = stale_tokens.count()
+
+    if count > 0:
+        stale_tokens.update(is_active=False)
+        logger.info("Deactivated stale tokens", extra={"count": count, "cutoff": str(cutoff)})
+
+    inactive_cutoff = timezone.now() - timedelta(days=180)
+    deleted_count, _ = DeviceToken.objects.filter(
+        is_active=False, last_seen_at__lt=inactive_cutoff
+    ).delete()
+
+    if deleted_count:
+        logger.info("Purged old inactive tokens", extra={"deleted": deleted_count})
+
+    return {"deactivated": count, "purged": deleted_count}
+```
+
+### Go FCM Sender (for high-throughput microservice)
+
+```go
+package fcm
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+
+	firebase "firebase.google.com/go/v4"
+	"firebase.google.com/go/v4/messaging"
+	"google.golang.org/api/option"
+)
+
+type ProjectManager struct {
+	mu   sync.RWMutex
+	apps map[string]*firebase.App
+}
+
+func NewProjectManager() *ProjectManager {
+	return &ProjectManager{apps: make(map[string]*firebase.App)}
+}
+
+func (pm *ProjectManager) GetMessagingClient(ctx context.Context, projectKey, credPath string) (*messaging.Client, error) {
+	pm.mu.RLock()
+	app, exists := pm.apps[projectKey]
+	pm.mu.RUnlock()
+
+	if !exists {
+		pm.mu.Lock()
+		if app, exists = pm.apps[projectKey]; !exists {
+			var err error
+			app, err = firebase.NewApp(ctx, nil, option.WithCredentialsFile(credPath))
+			if err != nil {
+				pm.mu.Unlock()
+				return nil, fmt.Errorf("initializing firebase app %s: %w", projectKey, err)
+			}
+			pm.apps[projectKey] = app
+		}
+		pm.mu.Unlock()
+	}
+
+	return app.Messaging(ctx)
+}
+
+type Sender struct {
+	pm     *ProjectManager
+	logger *slog.Logger
+}
+
+func (s *Sender) SendToTokens(ctx context.Context, projectKey, credPath string, tokens []string, title, body string, data map[string]string) error {
+	client, err := s.pm.GetMessagingClient(ctx, projectKey, credPath)
+	if err != nil {
+		return err
+	}
+
+	const batchSize = 500
+	for i := 0; i < len(tokens); i += batchSize {
+		end := i + batchSize
+		if end > len(tokens) {
+			end = len(tokens)
+		}
+		batch := tokens[i:end]
+
+		msg := &messaging.MulticastMessage{
+			Tokens: batch,
+			Notification: &messaging.Notification{
+				Title: title,
+				Body:  body,
+			},
+			Data: data,
+		}
+
+		resp, err := client.SendEachForMulticast(ctx, msg)
+		if err != nil {
+			s.logger.Error("multicast send failed", "error", err, "batch_start", i)
+			continue
+		}
+
+		s.logger.Info("batch sent",
+			"success", resp.SuccessCount,
+			"failure", resp.FailureCount,
+			"batch_start", i,
+		)
+	}
+
+	return nil
+}
+```

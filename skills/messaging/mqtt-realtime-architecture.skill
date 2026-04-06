@@ -1,0 +1,66 @@
+---
+name: mqtt-realtime-architecture
+version: 2.0.0
+domain: messaging
+description: Design MQTT-based realtime systems for device, mobile, and low-bandwidth delivery with topic hierarchy and QoS strategy.
+tags: [messaging, mqtt, realtime, devices, mobile]
+---
+
+## Purpose
+Design lightweight realtime architectures for intermittently connected clients and device fleets.
+
+## When to Use
+Use when low-overhead pub/sub, retained state, or unreliable network conditions make MQTT a better fit than Kafka or raw WebSockets alone.
+
+## Input Format
+```yaml
+clients:
+  types: string[]
+  connection_quality: "stable" | "mixed" | "poor"
+  concurrent_clients: number
+requirements:
+  latency_ms: number
+  qos_level: "0" | "1" | "2" | "mixed"
+  retained_state: boolean
+  offline_delivery: boolean
+```
+
+## Output Format
+```yaml
+architecture:
+  broker_model: string
+  topic_hierarchy: string[]
+  qos_policy: string
+session_strategy:
+  auth: string
+  reconnect: string
+  observability: string[]
+hybrid_notes:
+  upstream_bridge: string
+```
+
+## Execution Logic
+1. Classify clients by reliability and message criticality.
+2. IF bandwidth is constrained, prefer compact topic hierarchies and minimal payloads.
+3. IF commands must survive reconnects, use persistent sessions and retained state where appropriate.
+4. IF backend analytics or durable processing is needed, bridge MQTT into Kafka or queue storage.
+5. Return QoS, session, and auth choices together.
+
+## Rules
+1. Match QoS to business criticality; do not default everything to QoS 2.
+2. Topic hierarchy must encode tenant or device ownership explicitly.
+3. Use short-lived credentials and per-device authorization.
+4. Monitor broker connection churn, dropped sessions, and retained message count.
+5. Separate telemetry topics from control topics.
+
+## Constraints
+- Never expose wildcard subscriptions broader than authorization allows.
+- Never overload retained messages as a database.
+- Never use MQTT where request-response semantics dominate.
+
+## Examples
+Input: mobile and IoT app pushing presence and device updates.
+Output: MQTT for device/session fanout plus Kafka bridge for durable processing.
+
+## Output Style
+Return a realtime architecture note with topic tree, QoS map, and hybrid bridge if needed.

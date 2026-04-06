@@ -1,0 +1,69 @@
+---
+name: multi-region-deployment
+version: 2.0.0
+domain: backend
+description: Design active-active and active-passive multi-region systems with data strategy, failover controls, and region-aware traffic management.
+tags: [backend, multi-region, disaster-recovery, traffic, resiliency]
+---
+
+## Purpose
+Define when and how to run services across regions for latency, resilience, sovereignty, and disaster recovery.
+
+## When to Use
+Use when availability targets, regional latency, or compliance requirements exceed what one region can safely support.
+
+## Input Format
+```yaml
+business:
+  regions: string[]
+  rto_minutes: number
+  rpo_minutes: number
+  sovereignty_rules: string[]
+traffic:
+  read_write_pattern: "global-read-local-write" | "global-read-write" | "primary-secondary"
+  latency_sensitivity: "low" | "medium" | "high"
+data:
+  primary_stores: string[]
+  mutable_shared_state: boolean
+```
+
+## Output Format
+```yaml
+topology:
+  mode: "active-passive" | "active-active" | "regional-cells"
+  traffic_steering: string
+  data_strategy: string
+failover:
+  trigger: string
+  automation: string
+  rollback: string
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Translate RTO, RPO, and latency targets into topology options.
+2. IF mutable shared state is hard to reconcile, prefer `active-passive` or `regional-cells`.
+3. IF traffic is largely regional and data can be partitioned, prefer cells with region-local ownership.
+4. IF business needs global write availability, define conflict resolution explicitly before recommending active-active.
+5. Return failover trigger, data replication model, and operator runbook expectations.
+
+## Rules
+1. Keep control plane and data plane failure modes separate.
+2. Test regional failover with production-like drills.
+3. Prefer region-local reads and writes where ownership allows it.
+4. Monitor replication lag and health before shifting traffic.
+5. Align DNS, load balancer, and database failover behavior.
+
+## Constraints
+- Never recommend active-active without a conflict model.
+- Never call a topology multi-region if secrets, CI/CD, or observability remain single-region choke points.
+- Never assume failover works without drills.
+
+## Examples
+Input: customer-facing API across US and EU with 15-minute RTO and sovereignty rules.
+Output: regional cells with local writes, global edge routing, and per-region failover runbooks.
+
+## Output Style
+Return a topology memo with data strategy, failover design, and primary risks.

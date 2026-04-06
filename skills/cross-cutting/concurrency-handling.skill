@@ -1,0 +1,68 @@
+---
+name: concurrency-handling
+version: 2.0.0
+domain: cross-cutting
+description: Choose locking, queueing, optimistic control, and coordination patterns for concurrent systems and shared resources.
+tags: [concurrency, locking, optimistic-control, race-conditions]
+---
+
+## Purpose
+Prevent races, lost updates, and throughput collapse under concurrent load.
+
+## When to Use
+Use when multiple workers, requests, users, or services can touch the same resource or state transition at the same time.
+
+## Input Format
+```yaml
+resource:
+  type: string
+  conflict_pattern: "rare" | "moderate" | "hot"
+  criticality: "low" | "medium" | "high"
+workload:
+  writers: number
+  readers: number
+  distributed: boolean
+requirements:
+  latency_sensitive: boolean
+```
+
+## Output Format
+```yaml
+coordination_strategy:
+  model: string
+  scope: string
+  rationale: string
+controls:
+  conflict_detection: string
+  retry_policy: string
+  observability: string[]
+risks:
+  - risk: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Identify contention frequency and consequence of conflict.
+2. IF contention is low and latency matters, prefer optimistic concurrency.
+3. IF contention is high on a small keyspace, serialize with locks, queues, or partition ownership.
+4. IF coordination crosses services, move from in-process locks to durable coordination or ownership models.
+5. Define retries, deadlock prevention, and visibility before finalizing the design.
+
+## Rules
+1. Keep lock scope and duration minimal.
+2. Make retries bounded and idempotent.
+3. Prefer ownership partitioning over global locks when scale grows.
+4. Use database constraints as a correctness backstop.
+5. Measure conflict rate and lock wait time.
+
+## Constraints
+- Never use distributed locks for what a single database constraint can solve.
+- Never add retries without deduplication or idempotency.
+- Never ignore starvation and fairness in hot paths.
+
+## Examples
+Input: coupon redemption service with bursty concurrent claims.
+Output: unique DB constraint plus short reservation transaction and bounded retry.
+
+## Output Style
+Return a direct coordination plan with contention reasoning and recovery controls.

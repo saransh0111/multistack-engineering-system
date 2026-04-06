@@ -1,0 +1,70 @@
+---
+name: eventual-consistency
+version: 2.0.0
+domain: backend
+description: Design eventual consistency boundaries, read-model lag handling, reconciliation jobs, and user-facing strategies for asynchronous systems.
+tags: [backend, eventual-consistency, read-models, async, reconciliation]
+---
+
+## Purpose
+Define how asynchronous systems stay trustworthy when writes and reads converge over time instead of instantly.
+
+## When to Use
+Use when services publish domain events, maintain projections, or sync state across bounded contexts.
+
+## Input Format
+```yaml
+system:
+  source_of_truth: string
+  downstream_models: string[]
+  event_transport: string
+requirements:
+  max_allowed_lag_seconds: number
+  user_visibility: "internal" | "customer-facing"
+  reconciliation_frequency: string
+risks:
+  stale_read_impact: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+consistency_plan:
+  source_of_truth: string
+  projection_strategy: string
+  lag_budget: string
+ux_policy:
+  stale_state_message: string
+  retry_or_refresh: string
+reconciliation:
+  trigger: string
+  repair_steps: string[]
+failure_modes:
+  - mode: string
+    mitigation: string
+```
+
+## Execution Logic
+1. Mark the authoritative writer and every dependent read model.
+2. IF stale reads are unacceptable for the user action, route the read to the source of truth or block until confirmation.
+3. IF lag is acceptable, expose status states and freshness timestamps instead of pretending the read is final.
+4. Add reconciliation for missed, duplicated, or out-of-order events.
+5. Define how operators detect drift and how users recover from stale state.
+
+## Rules
+1. Every projection must have a replay path from durable events or source tables.
+2. Customer-visible workflows need explicit pending states when write propagation is asynchronous.
+3. Measure lag, projection failure rate, and replay backlog.
+4. Couple eventual consistency with idempotent consumers and dead-letter recovery.
+5. Keep business invariants local where possible; propagate derived state asynchronously.
+
+## Constraints
+- Never hide known staleness on customer-critical balances, inventory, or compliance state.
+- Never use eventual consistency as an excuse for missing ownership of source data.
+- Always define drift detection.
+
+## Examples
+Input: order service emits events to analytics and shipping projections.
+Output: order DB as source of truth, projection lag SLA, pending UI state, nightly repair job, and replay command.
+
+## Output Style
+Return a short consistency plan with lag policy, UX impact, and repair mechanics.

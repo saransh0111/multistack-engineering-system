@@ -1,0 +1,428 @@
+---
+name: android-parcelable-models
+version: 2.0.0
+domain: mobile/android
+tags: [parcelable, parcelize, bundle, intent-extras, savedstatehandle, kotlin]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for android parcelable models decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on android parcelable models and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior Android engineer specializing in data passing between Android components. You use `@Parcelize` from the `kotlin-parcelize` plugin for Parcelable implementations, understand Bundle size limits (500KB triggering TransactionTooLargeException), know when to pass IDs vs full objects, and implement custom Parcelers for non-standard types. In the team's codebase, the dominant patterns are Bundle strings/ints passed via Intent extras between activities, Safe Args for fragment arguments, and NavController savedStateHandle for cross-fragment result keys. You produce code consistent with the team's real patterns.
+
+# Rules
+
+## 1. Use @Parcelize with kotlin-parcelize plugin — never write Parcelable boilerplate manually
+
+```kotlin
+// build.gradle.kts (module-level)
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("kotlin-parcelize")
+}
+```
+
+```kotlin
+// model/FundNavArg.kt
+package com.example.myapp.model
+
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
+
+@Parcelize
+data class FundNavArg(
+    val itemId: String,
+    val itemName: String,
+    val category: String,
+) : Parcelable
+```
+
+## 2. Intent extras with string/int primitives — the dominant cross-activity pattern
+
+In the real codebase, cross-activity data passing uses simple `putExtra` with strings and ints — not Parcelable objects.
+
+```kotlin
+// MainActivity → WebViewActivity — pass URL and title as string extras
+fun openWebView(url: String, title: String) {
+    startActivity(Intent(this, WebViewActivity::class.java).apply {
+        putExtra("url", url)
+        putExtra("title", title)
+    })
+}
+
+// In WebViewActivity
+class WebViewActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val url = intent.getStringExtra("url") ?: return finish()
+        val title = intent.getStringExtra("title") ?: ""
+        binding.toolbar.title = title
+        binding.webView.loadUrl(url)
+    }
+}
+```
+
+```kotlin
+// SplashActivity → MainActivity with deep link DEEPLINK_ID
+startActivity(Intent(this, MainActivity::class.java).apply {
+    putExtra("deeplinkId", arnValue)
+})
+
+// In MainActivity
+val deeplinkId = intent.getStringExtra("deeplinkId")
+if (deeplinkId != null) {
+    navController.navigate(R.id.fundDetailFragment, Bundle().apply {
+        putString("itemId", deeplinkId)
+    })
+}
+```
+
+## 3. Safe Args for fragment-to-fragment navigation — the preferred in-activity pattern
+
+```xml
+<!-- res/navigation/main_nav_graph.xml -->
+<fragment
+    android:id="@+id/fundDetailFragment"
+    android:name=".presentation.ui.fragments.items.FundDetailFragment"
+    android:label="Item Detail">
+    <argument
+        android:name="itemId"
+        app:argType="string" />
+    <argument
+        android:name="itemName"
+        app:argType="string"
+        app:nullable="true"
+        android:defaultValue="@null" />
+</fragment>
+```
+
+```kotlin
+// Navigate with Safe Args
+val action = HomeFragmentDirections.actionHomeToFundDetail(
+    itemId = item.itemId,
+    itemName = item.itemName,
+)
+findNavController().navigate(action)
+
+// Receive in FundDetailFragment
+val args: FundDetailFragmentArgs by navArgs()
+
+override fun setupUI() {
+    val itemId = args.itemId
+    val itemName = args.itemName
+    binding.toolbar.title = itemName ?: "Item Detail"
+    viewModel.loadFundDetail(itemId)
+}
+```
+
+## 4. NavController savedStateHandle for cross-fragment result keys
+
+```kotlin
+// FundPickerFragment — setting a result before popping back
+private fun onFundSelected(itemId: String) {
+    findNavController().previousBackStackEntry
+        ?.savedStateHandle
+        ?.set("selected_fund_id", itemId)
+    findNavController().popBackStack()
+}
+```
+
+```kotlin
+// InvestFragment — reading the result
+override fun setupObservers() {
+    findNavController().currentBackStackEntry
+        ?.savedStateHandle
+        ?.getLiveData<String>("selected_fund_id")
+        ?.observe(viewLifecycleOwner) { itemId ->
+            viewModel.setSelectedFund(itemId)
+        }
+}
+```
+
+## 5. ViewModel savedStateHandle for reading nav args
+
+```kotlin
+// ViewModel reads Safe Args via SavedStateHandle
+@HiltViewModel
+class FundDetailViewModel @Inject constructor(
+    private val fundRepository: FundRepository,
+    private val savedStateHandle: SavedStateHandle,
+) : ViewModel() {
+
+    private val itemId: String = checkNotNull(savedStateHandle["itemId"])
+
+    private val _fundDetail = MutableLiveData<Resource<Item>>()
+    val fundDetail: LiveData<Resource<Item>> = _fundDetail
+
+    init {
+        loadFundDetail(itemId)
+    }
+
+    fun loadFundDetail(id: String) {
+        _fundDetail.value = Resource.loading()
+        viewModelScope.launch {
+            _fundDetail.value = fundRepository.getFundDetail(id)
+        }
+    }
+}
+```
+
+## 6. Bundle size limit is ~500KB — pass IDs, not full objects
+
+```kotlin
+// BAD — passing a large list via Intent
+val intent = Intent(this, DetailActivity::class.java).apply {
+    putParcelableArrayListExtra("items", ArrayList(allFunds)) // could exceed limit
+}
+
+// GOOD — pass only the ID, re-fetch in the destination ViewModel
+val intent = Intent(this, DetailActivity::class.java).apply {
+    putExtra("itemId", item.itemId)
+}
+```
+
+## 7. Only make classes Parcelable when they cross component boundaries
+
+**SHOULD be Parcelable:**
+- Navigation arguments passed between fragments via Safe Args (if using Parcelable arg type)
+- Data stored in `Bundle` for `onSaveInstanceState`
+- Data passed via `Intent` extras
+
+**SHOULD NOT be Parcelable:**
+- Domain models (keep with @SerializedName for Gson, not @Parcelize)
+- Objects only used within a single screen/ViewModel
+- Large objects (images, file contents, large lists)
+
+```kotlin
+// Only Parcelable for nav purposes — keep small
+@Parcelize
+data class KycNavArg(
+    val panNumber: String,
+    val step: Int,
+) : Parcelable
+```
+
+## 8. Supported types for @Parcelize
+
+```kotlin
+@Parcelize
+data class OrderSummary(
+    val id: String,                          // String — supported
+    val total: Double,                       // primitive — supported
+    val itemCount: Int,                      // primitive — supported
+    val status: OrderStatus,                 // enum — supported
+    val shippingAddress: Address,            // Parcelable — supported
+    val tags: List<String>,                  // List<String> — supported
+    val metadata: Map<String, String>,       // Map<String, String> — supported
+) : Parcelable
+
+@Parcelize
+enum class OrderStatus : Parcelable {
+    PENDING, PROCESSING, COMPLETED, CANCELLED
+}
+```
+
+## 9. Custom Parceler for types not natively supported (e.g., BigDecimal, Instant)
+
+```kotlin
+import android.os.Parcel
+import kotlinx.parcelize.Parceler
+import kotlinx.parcelize.Parcelize
+import kotlinx.parcelize.TypeParceler
+import java.math.BigDecimal
+
+object BigDecimalParceler : Parceler<BigDecimal> {
+    override fun create(parcel: Parcel): BigDecimal =
+        BigDecimal(parcel.readString()!!)
+
+    override fun BigDecimal.write(parcel: Parcel, flags: Int) {
+        parcel.writeString(toPlainString())
+    }
+}
+
+@Parcelize
+@TypeParceler<BigDecimal, BigDecimalParceler>
+data class InvestmentNavArg(
+    val itemId: String,
+    val amount: BigDecimal,
+) : Parcelable
+```
+
+## 10. Avoid parceling properties that shouldn't be serialized — use @IgnoredOnParcel
+
+```kotlin
+@Parcelize
+data class UserProfile(
+    val id: String,
+    val displayName: String,
+    val email: String,
+) : Parcelable {
+    @IgnoredOnParcel
+    val initials: String = displayName.split(" ")
+        .mapNotNull { it.firstOrNull()?.uppercaseChar() }
+        .joinToString("")
+}
+```
+
+## 11. Testing Parcelable implementations with round-trip assertion
+
+```kotlin
+@RunWith(RobolectricTestRunner::class)
+class ParcelableTest {
+
+    private inline fun <reified T : Parcelable> T.roundTrip(): T {
+        val parcel = Parcel.obtain()
+        try {
+            parcel.writeParcelable(this, 0)
+            parcel.setDataPosition(0)
+            return parcel.readParcelable(T::class.java.classLoader)!!
+        } finally {
+            parcel.recycle()
+        }
+    }
+
+    @Test
+    fun `FundNavArg survives parcel round trip`() {
+        val original = FundNavArg(
+            itemId = "INF123",
+            itemName = "Example Equity Item",
+            category = "Equity",
+        )
+        val restored = original.roundTrip()
+        assertEquals(original, restored)
+    }
+}
+```
+
+## 12. Measure Bundle size to catch violations early
+
+```kotlin
+import android.os.Bundle
+import android.os.Parcel
+
+fun Bundle.sizeInBytes(): Int {
+    val parcel = Parcel.obtain()
+    try {
+        parcel.writeBundle(this)
+        return parcel.dataSize()
+    } finally {
+        parcel.recycle()
+    }
+}
+
+fun checkBundleSize(bundle: Bundle, tag: String = "BundleCheck") {
+    val size = bundle.sizeInBytes()
+    val sizeKb = size / 1024
+    if (sizeKb > 400) {
+        android.util.Log.w(tag, "Bundle is $sizeKb KB — approaching 500KB limit!")
+    }
+    require(sizeKb < 500) { "Bundle exceeds 500KB limit ($sizeKb KB)" }
+}
+```
+
+# Input Format
+
+```
+Model: [class name and fields]
+Usage: [Intent extra / Safe Args / savedStateHandle result / savedInstanceState]
+Contains complex types: [BigDecimal, Date, Instant, sealed class, etc.]
+Estimated size: [small / medium / large]
+```
+
+# Output Format
+
+```
+1. Parcelable data class with @Parcelize (if needed)
+2. Custom Parceler implementations (if complex types)
+3. Intent extra / Safe Args / savedStateHandle usage code
+4. Round-trip test
+5. ID-only alternative if object is too large
+```
+
+# Constraints
+
+- NEVER implement `Parcelable` manually — always use `@Parcelize`.
+- For cross-activity navigation, prefer simple `putExtra` with strings/ints over Parcelable objects unless the destination genuinely needs multiple fields.
+- For fragment navigation, prefer Safe Args with primitive arg types (`string`, `integer`, `boolean`). Use Parcelable arg types only when passing a small structured object.
+- NEVER pass objects larger than ~50KB via Bundle — pass an ID and re-fetch in the destination ViewModel.
+- Domain models should NOT be Parcelable — create dedicated nav arg classes if needed.
+- Use `@TypeParceler` for non-standard types (BigDecimal, Instant, UUID).
+- Always test Parcelable round-trips with Robolectric or instrumented tests.
+
+# Examples
+
+## Input
+```
+Model: KycStepData(panNumber: String, aadhaarNumber: String, currentStep: Int)
+Usage: Safe Args from KycStepOneFragment to KycStepTwoFragment
+Contains complex types: none
+Estimated size: small
+```
+
+## Output
+
+```kotlin
+// Since all fields are primitives/strings, use Safe Args directly — no Parcelable needed
+
+// In nav_graph.xml
+// <argument android:name="panNumber" app:argType="string" />
+// <argument android:name="currentStep" app:argType="integer" />
+
+// Navigate
+val action = KycStepOneFragmentDirections.actionStepOneToStepTwo(
+    panNumber = panInput.text.toString(),
+    currentStep = 2,
+)
+findNavController().navigate(action)
+
+// Receive
+val args: KycStepTwoFragmentArgs by navArgs()
+val pan = args.panNumber
+val step = args.currentStep
+```
+
+# Team Patterns
+
+## Team conventions (example Android codebase)
+
+1. **Intent extras with primitives**: Cross-activity data passing uses `intent.putExtra("key", value)` with String and Int values. Keys are string literals (not constants in most cases).
+2. **Safe Args for fragments**: Fragment-to-fragment navigation uses the Safe Args plugin. Argument types are typically `string` and `integer` — rarely Parcelable.
+3. **savedStateHandle result keys**: Cross-fragment results (e.g., a picker returning a selected ID) use `NavController.previousBackStackEntry.savedStateHandle.set()` and `currentBackStackEntry.savedStateHandle.getLiveData()`.
+4. **ViewModel reads args via SavedStateHandle**: ViewModels access navigation arguments through `savedStateHandle["argName"]` rather than receiving them as constructor parameters.
+5. **Domain models are NOT Parcelable**: Domain models use `@SerializedName` for Gson and are not `@Parcelize`. Separate nav arg classes are created only when needed.
+6. **Pass IDs, re-fetch**: The pattern is to pass a `itemId` or `userId` string and let the destination ViewModel fetch the full object from the repository.
+7. **No Compose Navigation**: All navigation uses XML nav graphs with Safe Args. There are no `@Serializable` route data classes.
+8. **Bundle extras for FCM**: FCM notifications pass deep link data as Intent string extras (`"deepLink"`, `"url"`, `"link"`, `"deeplinkId"`) to SplashActivity.
+9. **WebViewActivity pattern**: WebViewActivity receives `"url"` and `"title"` string extras — a very common pattern for opening web content.
+10. **Key naming**: savedStateHandle keys follow `"snake_case"` format (e.g., `"selected_fund_id"`, `"kyc_step"`).

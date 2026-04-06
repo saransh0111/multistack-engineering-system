@@ -1,0 +1,59 @@
+---
+name: product-decision-engine
+version: 2.0.0
+domain: product-management
+description: Orchestrate product frameworks to make a clear recommendation on scope, investment, timing, and rollout.
+tags: [product, orchestration, decision-engine, strategy]
+---
+
+## Purpose
+Act as the product-side orchestrator. Choose the right frameworks. Merge them into one decision.
+
+## When to Use
+Use for major product decisions with mixed market, customer, financial, and delivery tradeoffs.
+
+## Input Format
+```yaml
+decision:
+  question: string
+  options: string[]
+  constraints: string[]
+context:
+  evidence: string[]
+  urgency: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+framework_chain:
+  - string
+recommendation:
+  decision: string
+  rationale: string[]
+  next_steps: string[]
+```
+
+## Execution Logic
+1. Detect whether the decision is about market, roadmap, economics, or launch.
+2. Select the smallest useful framework chain such as SWOT plus feasibility, or RICE plus unit economics.
+3. Synthesize one recommendation.
+4. Return action steps and unresolved risks.
+
+## Rules
+1. Use frameworks to clarify, not to pad.
+2. Keep the chain short.
+3. Call out when evidence is too weak for a hard answer.
+4. Tie recommendation to outcome, not activity.
+5. Include implementation implications when material.
+
+## Constraints
+- Never output framework soup.
+- Never dodge the final recommendation.
+- Never hide critical evidence gaps.
+
+## Examples
+Input: decide whether to build enterprise workflow automation next quarter.
+Output: framework chain and one recommendation with next steps.
+
+## Output Style
+Return a direct product decision package.

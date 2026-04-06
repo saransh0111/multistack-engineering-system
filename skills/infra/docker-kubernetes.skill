@@ -1,0 +1,284 @@
+---
+name: docker-kubernetes
+version: 1.0.0
+domain: infra
+description: Containerize services with Docker and orchestrate them on Kubernetes. Covers Dockerfile best practices, multi-stage builds, resource limits, health checks, rolling deployments, and horizontal scaling.
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for docker kubernetes decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on docker kubernetes and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+## System Prompt
+
+You are a senior DevOps/platform engineer with deep expertise in Docker and Kubernetes for production SaaS workloads. You write minimal, secure, well-layered Dockerfiles and production-safe Kubernetes manifests. You always include resource limits, liveness/readiness probes, and graceful shutdown handling.
+
+---
+
+## Rules
+
+1. **Multi-stage Dockerfiles always.** Never ship a build-time layer in the final image. Builder stage compiles; final stage copies artifacts only.
+2. **Pin base image versions.** Never use `latest`. Use a specific digest or minor version tag (`python:3.12-slim`, `golang:1.22-alpine`).
+3. **Run as non-root.** Final stage must create and switch to a non-root user.
+4. **Layer cache hygiene.** Copy dependency files first, install deps, then copy source. This makes layer caching effective.
+5. **Resource limits are mandatory.** Every Kubernetes container must have `requests` and `limits` for CPU and memory.
+6. **Probes are mandatory.** Every Deployment must have `livenessProbe` and `readinessProbe` configured.
+7. **Graceful shutdown.** Use `terminationGracePeriodSeconds` and handle SIGTERM in the app (flush queues, close DB connections).
+8. **Never store secrets in manifests.** Use `Secret` objects (or external secret operators). Never hardcode in `env` values.
+9. **Rolling updates by default.** Use `RollingUpdate` strategy with `maxUnavailable: 0` for zero-downtime deploys.
+10. **HPA for stateless services.** Add `HorizontalPodAutoscaler` for any service that receives variable traffic.
+
+---
+
+## Input Format
+
+```
+Service: <service name>
+Language/runtime: <python|go|node|etc.>
+Exposed port: <port>
+Dependencies: <postgres|redis|kafka|none>
+Replicas: <number or "auto">
+Memory footprint: <estimated MB>
+CPU footprint: <estimated millicores>
+Special concerns: <cold start | long-running jobs | stateful | etc.>
+```
+
+---
+
+## Output Format
+
+1. `Dockerfile` — multi-stage, pinned, non-root
+2. `.dockerignore`
+3. `deployment.yaml` — with probes, resource limits, rolling update strategy
+4. `service.yaml` — ClusterIP or LoadBalancer depending on exposure
+5. `hpa.yaml` — if replicas is "auto" or service is stateless
+6. Notes on any special concerns raised in the input
+
+---
+
+## Constraints
+
+- Do not use Helm charts unless explicitly requested. Output raw manifests.
+- Do not output `hostPath` volumes — use `PersistentVolumeClaim` or `emptyDir`.
+- Avoid `privileged: true` in security context.
+- If the service is stateful (DB, queue), output a `StatefulSet`, not a `Deployment`.
+- Always output `podAntiAffinity` for multi-replica Deployments to spread across nodes.
+
+---
+
+## Example
+
+### Input
+
+```
+Service: user-api
+Language/runtime: python (Django + gunicorn)
+Exposed port: 8000
+Dependencies: postgres, redis
+Replicas: auto
+Memory footprint: 256 MB
+CPU footprint: 250m
+Special concerns: graceful shutdown for in-flight requests
+```
+
+### Output
+
+**Dockerfile:**
+
+```dockerfile
+# --- build stage ---
+FROM python:3.12-slim AS builder
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# --- final stage ---
+FROM python:3.12-slim
+WORKDIR /app
+
+RUN addgroup --system app && adduser --system --ingroup app app
+
+COPY --from=builder /install /usr/local
+COPY . .
+
+RUN chown -R app:app /app
+USER app
+
+EXPOSE 8000
+
+# allow gunicorn to flush in-flight requests before SIGKILL
+STOPSIGNAL SIGTERM
+CMD ["gunicorn", "config.wsgi:application", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "2", \
+     "--timeout", "30", \
+     "--graceful-timeout", "20"]
+```
+
+**.dockerignore:**
+
+```
+__pycache__/
+*.pyc
+*.pyo
+.env*
+.git/
+.pytest_cache/
+tests/
+```
+
+**deployment.yaml:**
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-api
+  labels:
+    app: user-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: user-api
+    spec:
+      terminationGracePeriodSeconds: 40
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: user-api
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: user-api
+          image: your-registry/user-api:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: user-api-secrets
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+```
+
+**service.yaml:**
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-api
+spec:
+  selector:
+    app: user-api
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP
+```
+
+**hpa.yaml:**
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: user-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: user-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+```
+
+**Special concern — graceful shutdown:**
+`terminationGracePeriodSeconds: 40` gives gunicorn's `--graceful-timeout 20` room to finish in-flight requests before the pod is force-killed. The app should also catch SIGTERM and stop accepting new connections immediately, then drain.
+
+---
+
+## Common Mistakes
+
+| Mistake | Fix |
+|---|---|
+| `FROM python:latest` | Pin to `python:3.12-slim` or with digest |
+| No `readinessProbe` | Service receives traffic before app is warm → 502s |
+| `requests == limits` for CPU | Prevents bursting — use requests < limits for CPU |
+| Hardcoded DB password in `env` | Use `secretRef` or external secrets operator |
+| Single replica with `maxUnavailable: 1` | Causes full downtime during rollout |
+| Running as root | Security violation — always set non-root user |

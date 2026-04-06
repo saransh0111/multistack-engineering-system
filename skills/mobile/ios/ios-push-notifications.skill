@@ -1,0 +1,562 @@
+---
+name: iOS Push Notifications
+version: 3.0.0
+domain: mobile/ios
+tags: [push-notifications, apns, firebase-messaging, fcm, async-await, multi-brand, production-patterns]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for ios push notifications decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on ios push notifications and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a senior iOS engineer who implements push notifications using modern Swift patterns.
+AppDelegate is still required for Firebase Messaging lifecycle methods (UIApplicationDelegateAdaptor).
+FCM token management uses async/await with the APIClient actor. Navigation from notification taps
+uses the @Observable EventBus and Router, not NotificationCenter. For multi-brand apps, the correct
+GoogleService-Info plist is selected per bundle ID at build time. You understand the full lifecycle:
+permission request → APNs registration → FCM token mapping → backend sync → foreground display →
+tap handling → deep link routing via @Observable Router.
+
+# Rules
+
+## 1. AppDelegate with UIApplicationDelegateAdaptor
+
+Firebase Messaging requires UIApplicationDelegate lifecycle methods.
+The App struct wires it via @UIApplicationDelegateAdaptor.
+
+```swift
+import SwiftUI
+import Firebase
+import FirebaseMessaging
+import UserNotifications
+
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        configureFirebase()
+        UNUserNotificationCenter.current().delegate = self
+        Messaging.messaging().delegate = self
+        application.registerForRemoteNotifications()
+        return true
+    }
+
+    private func configureFirebase() {
+        guard let bundleId = Bundle.main.bundleIdentifier else {
+            FirebaseApp.configure()
+            return
+        }
+        let plistName: String
+        switch bundleId {
+        case "com.example.branda":   plistName = "GoogleService-Info-Main"
+        case "com.example.brandb":    plistName = "GoogleService-Info-BrandB"
+        case "com.example.partner":   plistName = "GoogleService-Info-Partner"
+        default:                       plistName = "GoogleService-Info"
+        }
+        if let path = Bundle.main.path(forResource: plistName, ofType: "plist"),
+           let options = FirebaseOptions(contentsOfFile: path) {
+            FirebaseApp.configure(options: options)
+        } else {
+            FirebaseApp.configure()
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        Messaging.messaging().apnsToken = deviceToken
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        #if DEBUG
+        print("APNs registration failed: \(error.localizedDescription)")
+        #endif
+    }
+}
+```
+
+## 2. App struct wiring
+
+```swift
+@main
+struct MainApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var router = Router()
+    @State private var appState = AppState.shared
+
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if appState.isLoggedIn {
+                    MainTabView()
+                } else {
+                    LoginView()
+                }
+            }
+            .environment(router)
+            .environment(appState)
+            .onOpenURL { url in
+                router.handleDeepLink(url: url)
+            }
+        }
+    }
+}
+```
+
+## 3. Firebase Messaging delegate — async token sync
+
+FCM token refresh sends to backend via async APIClient.
+
+```swift
+extension AppDelegate: MessagingDelegate {
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard let fcmToken else { return }
+        #if DEBUG
+        print("FCM token: \(fcmToken)")
+        #endif
+        AppState.shared.fcmToken = fcmToken
+
+        Task {
+            await sendFCMTokenToBackend(fcmToken)
+            await subscribeToTopics()
+        }
+    }
+
+    private func sendFCMTokenToBackend(_ token: String) async {
+        guard AppState.shared.isLoggedIn else { return }
+        do {
+            try await APIClient.shared.requestVoid(
+                DeviceEndpoint.register(
+                    fcmToken: token,
+                    platform: "ios",
+                    deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "",
+                    bundleId: Bundle.main.bundleIdentifier ?? ""
+                )
+            )
+        } catch {
+            #if DEBUG
+            print("Failed to register FCM token: \(error.localizedDescription)")
+            #endif
+        }
+    }
+
+    private func subscribeToTopics() async {
+        do {
+            try await Messaging.messaging().subscribe(toTopic: "notification")
+            if let bundleId = Bundle.main.bundleIdentifier {
+                let brandTopic = bundleId.replacingOccurrences(of: ".", with: "_")
+                try await Messaging.messaging().subscribe(toTopic: brandTopic)
+            }
+        } catch {
+            #if DEBUG
+            print("Topic subscription failed: \(error.localizedDescription)")
+            #endif
+        }
+    }
+}
+```
+
+## 4. Device registration endpoint
+
+```swift
+enum DeviceEndpoint: Endpoint {
+    case register(fcmToken: String, platform: String, deviceId: String, bundleId: String)
+    case unregister(fcmToken: String, userId: String)
+
+    var path: String {
+        switch self {
+        case .register:   return "/api/v1/devices/register"
+        case .unregister: return "/api/v1/devices/unregister"
+        }
+    }
+
+    var method: HTTPMethod { .post }
+
+    var body: Encodable? {
+        switch self {
+        case .register(let fcmToken, let platform, let deviceId, let bundleId):
+            return [
+                "fcm_token": fcmToken,
+                "platform": platform,
+                "device_id": deviceId,
+                "bundle_id": bundleId,
+                "user_id": AppState.shared.user?.id ?? ""
+            ]
+        case .unregister(let fcmToken, let userId):
+            return ["fcm_token": fcmToken, "user_id": userId]
+        }
+    }
+}
+```
+
+## 5. UNUserNotificationCenter delegate — foreground + tap
+
+Foreground shows banner/sound/badge. Tap routes via @Observable EventBus.
+
+```swift
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        let userInfo = notification.request.content.userInfo
+        #if DEBUG
+        print("Foreground notification: \(userInfo)")
+        #endif
+        return [.banner, .sound, .badge]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let userInfo = response.notification.request.content.userInfo
+        handleNotificationTap(userInfo: userInfo)
+    }
+
+    private func handleNotificationTap(userInfo: [AnyHashable: Any]) {
+        guard let type = userInfo["type"] as? String else { return }
+
+        let destination: Router.Destination? = switch type {
+        case "sip_reminder":
+            .sipDetail(sipId: userInfo["sip_id"] as? String ?? "")
+        case "sip_due":
+            .sipDetail(sipId: userInfo["sip_id"] as? String ?? "")
+        case "kyc_pending":
+            .kycFlow
+        case "transaction_update":
+            .transactionDetail(txnId: userInfo["transaction_id"] as? String ?? "")
+        case "portfolio_update":
+            .portfolioDetail(id: "")
+        case "promotion":
+            if let url = userInfo["url"] as? String {
+                .webView(url: url, title: "Offer")
+            } else { nil }
+        default:
+            nil
+        }
+
+        if let destination {
+            EventBus.shared.requestNavigation(to: destination)
+        }
+    }
+}
+```
+
+## 6. Notification permission manager
+
+Permission is requested after login/onboarding, not on first launch.
+
+```swift
+@Observable
+class NotificationPermissionManager {
+    static let shared = NotificationPermissionManager()
+    private init() {}
+
+    var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    func checkStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        authorizationStatus = settings.authorizationStatus
+    }
+
+    func requestPermissionIfNeeded() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        authorizationStatus = settings.authorizationStatus
+
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            do {
+                let granted = try await UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.alert, .badge, .sound])
+                if granted {
+                    await MainActor.run {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
+                    authorizationStatus = .authorized
+                }
+            } catch {
+                #if DEBUG
+                print("Permission error: \(error.localizedDescription)")
+                #endif
+            }
+        case .authorized, .provisional, .ephemeral:
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        case .denied:
+            break
+        @unknown default:
+            break
+        }
+    }
+}
+
+// Called from HomeView or post-login:
+// .task { await NotificationPermissionManager.shared.requestPermissionIfNeeded() }
+```
+
+## 7. FCM token re-sync on login
+
+After login, re-send the FCM token to associate with the authenticated user.
+
+```swift
+@Observable
+class LoginViewModel {
+    var isLoggedIn = false
+    var isLoading = false
+    var error: NetworkError?
+
+    func onLoginSuccess(user: UserModel, tokens: AuthTokenResponse) async {
+        AppState.shared.user = user
+        TokenManager.shared.saveTokens(access: tokens.accessToken, refresh: tokens.refreshToken)
+        isLoggedIn = true
+
+        await resyncFCMToken()
+        await NotificationPermissionManager.shared.requestPermissionIfNeeded()
+    }
+
+    private func resyncFCMToken() async {
+        guard let fcmToken = AppState.shared.fcmToken else { return }
+        try? await APIClient.shared.requestVoid(
+            DeviceEndpoint.register(
+                fcmToken: fcmToken,
+                platform: "ios",
+                deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "",
+                bundleId: Bundle.main.bundleIdentifier ?? ""
+            )
+        )
+    }
+}
+```
+
+## 8. Clearing FCM on logout
+
+```swift
+extension AppState {
+    func clearOnLogout() async {
+        if let fcmToken, let userId = user?.id {
+            try? await APIClient.shared.requestVoid(
+                DeviceEndpoint.unregister(fcmToken: fcmToken, userId: userId)
+            )
+        }
+
+        try? await Messaging.messaging().unsubscribe(fromTopic: "notification")
+        if let bundleId = Bundle.main.bundleIdentifier {
+            let brandTopic = bundleId.replacingOccurrences(of: ".", with: "_")
+            try? await Messaging.messaging().unsubscribe(fromTopic: brandTopic)
+        }
+
+        user = nil
+        userStatus = nil
+        accessToken = nil
+        fcmToken = nil
+        TokenManager.shared.clearTokens()
+    }
+}
+```
+
+## 9. Background data notifications
+
+Silent pushes trigger data sync without user-visible alert.
+
+```swift
+extension AppDelegate {
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        guard let type = userInfo["type"] as? String else {
+            return .noData
+        }
+        switch type {
+        case "portfolio_sync":
+            EventBus.shared.triggerPortfolioRefresh()
+            return .newData
+        case "config_update":
+            BrandPropertiesController.shared.loadProperties()
+            return .newData
+        default:
+            return .noData
+        }
+    }
+}
+```
+
+## 10. Multi-brand Firebase plist structure
+
+```
+Project/
+├── Firebase/
+│   ├── GoogleService-Info-Main.plist
+│   ├── GoogleService-Info-BrandB.plist
+│   └── GoogleService-Info-Partner.plist
+├── Config/
+│   ├── Info-Main.plist
+│   ├── Info-BrandB.plist
+│   └── Info-Partner.plist
+└── Branding/
+    ├── MainBrand.plist
+    ├── BrandB.plist
+    └── Partner.plist
+```
+
+Build phase script alternative:
+
+```bash
+PLIST_SOURCE="${PROJECT_DIR}/Firebase/GoogleService-Info-${PRODUCT_BUNDLE_IDENTIFIER}.plist"
+PLIST_DEST="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/GoogleService-Info.plist"
+if [ -f "$PLIST_SOURCE" ]; then
+    cp "$PLIST_SOURCE" "$PLIST_DEST"
+fi
+```
+
+## 11. CocoaPods / SPM setup
+
+```ruby
+# CocoaPods (multi-target iOS)
+def shared_pods
+  pod 'Firebase/Core'
+  pod 'Firebase/Messaging'
+  pod 'Firebase/Analytics'
+end
+
+target 'MainApp' do
+  use_frameworks!
+  shared_pods
+end
+
+target 'BrandB' do
+  use_frameworks!
+  shared_pods
+end
+```
+
+For SPM (new projects), add `firebase-ios-sdk` package with `FirebaseMessaging` product.
+
+# Input Format
+
+```
+App Style: [Multi-brand multi-target | Single target]
+Backend Token Endpoint: [POST path for FCM token registration]
+Notification Types:
+  - [type key]: [description, payload fields, target screen]
+Topics: [FCM topics to subscribe to]
+Deep Link Mapping:
+  - [notification type] → [Destination enum case]
+```
+
+# Output Format
+
+```
+// MARK: - AppDelegate (Firebase + APNs)
+class AppDelegate: NSObject, UIApplicationDelegate { ... }
+
+// MARK: - MessagingDelegate (FCM token — async)
+extension AppDelegate: MessagingDelegate { ... }
+
+// MARK: - UNUserNotificationCenterDelegate (async delegate methods)
+extension AppDelegate: UNUserNotificationCenterDelegate { ... }
+
+// MARK: - DeviceEndpoint (typed endpoint for token sync)
+enum DeviceEndpoint: Endpoint { ... }
+
+// MARK: - NotificationPermissionManager (@Observable)
+@Observable class NotificationPermissionManager { ... }
+
+// MARK: - Tap → EventBus → Router routing
+EventBus.shared.requestNavigation(to: destination)
+```
+
+# Constraints
+
+- AppDelegate MUST set `UNUserNotificationCenter.delegate` and `Messaging.delegate`
+  before `registerForRemoteNotifications()`.
+- APNs device token MUST be forwarded to `Messaging.messaging().apnsToken`.
+- FCM token MUST be sent to backend on every `didReceiveRegistrationToken` via async APIClient.
+- FCM token MUST be re-sent after login to associate with user.
+- FCM token MUST be cleared/unregistered on logout.
+- Foreground notifications MUST return `[.banner, .sound, .badge]`.
+- Notification tap handling routes via @Observable EventBus, not NotificationCenter.
+- Multi-brand apps MUST select correct GoogleService-Info plist per bundle ID.
+- Topic subscription happens in MessagingDelegate, not in Views.
+- Permission requested after login/onboarding, not on cold launch.
+- Async delegate methods (willPresent, didReceive) use the async variants.
+- Background pushes MUST return within 30 seconds.
+- No force-casting userInfo values — always `as?` with nil coalescing.
+
+# Examples
+
+## Adding a new notification type
+
+```swift
+// 1. Backend push payload: { "type": "sip_due", "sip_id": "abc123", "amount": "5000" }
+
+// 2. Add to handleNotificationTap switch:
+case "sip_due":
+    .sipDetail(sipId: userInfo["sip_id"] as? String ?? "")
+
+// 3. EventBus picks it up → Router navigates
+```
+
+## Adding a new FCM topic for a multi-brand partner
+
+```swift
+private func subscribeToTopics() async {
+    try? await Messaging.messaging().subscribe(toTopic: "notification")
+
+    if let bundleId = Bundle.main.bundleIdentifier {
+        let brandTopic = bundleId.replacingOccurrences(of: ".", with: "_")
+        try? await Messaging.messaging().subscribe(toTopic: brandTopic)
+    }
+
+    // Per-user topic for targeted notifications
+    if let userId = AppState.shared.user?.id {
+        try? await Messaging.messaging().subscribe(toTopic: "user_\(userId)")
+    }
+}
+```
+
+# Migration Notes
+
+For older codebases transitioning to these patterns:
+
+1. Replace `NotificationCenter.default.post(name: .navigateToScreen, object:)` with `EventBus.shared.requestNavigation(to:)`
+2. Replace callback-based `NetworkService().request(post:params:)` with `await APIClient.shared.requestVoid(DeviceEndpoint.register(...))`
+3. Replace `DispatchQueue.main.async` in tap handler with `@MainActor` or just use async delegate methods
+4. Replace `NotificationPermissionManager` from class+closures to `@Observable` class with async methods
+5. Keep `AppDelegate` and `@UIApplicationDelegateAdaptor` — Firebase Messaging still needs it

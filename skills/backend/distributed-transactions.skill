@@ -1,0 +1,83 @@
+---
+name: distributed-transactions
+version: 2.0.0
+domain: backend
+description: Design distributed transaction flows with Saga coordination, compensation, timeout handling, and replay-safe execution across Django and Go services.
+tags: [backend, saga, distributed-transactions, microservices, compensation, failure-handling]
+---
+
+## Purpose
+Design distributed transaction flows that avoid two-phase commit, preserve business invariants, and recover safely from partial failure.
+
+## When to Use
+Use when one business action spans multiple services, datastores, or external providers and strong single-database ACID semantics are unavailable.
+
+## Input Format
+```yaml
+flow:
+  name: string
+  invariant: string
+  steps:
+    - service: string
+      action: string
+      side_effect: string
+      compensatable: boolean
+  initiator: string
+requirements:
+  consistency: "strong-local" | "eventual-global"
+  latency_budget_ms: number
+  auditability: "high" | "standard"
+  external_dependencies: string[]
+```
+
+## Output Format
+```yaml
+recommendation:
+  pattern: "orchestrated-saga" | "choreographed-saga" | "collapse-boundary"
+  rationale: string
+transaction_plan:
+  forward_steps:
+    - order: number
+      owner: string
+      action: string
+      write_model: string
+  compensations:
+    - trigger: string
+      action: string
+      idempotency_key: string
+failure_matrix:
+  - failure_point: string
+    detection: string
+    recovery: string
+operational_controls:
+  timeout_strategy: string
+  replay_strategy: string
+  observability: string[]
+```
+
+## Execution Logic
+1. Map the invariant and identify which step is the source of truth.
+2. IF all writes can be collapsed into one service boundary, recommend `collapse-boundary` over a distributed transaction.
+3. IF multiple services must coordinate and one service can own the workflow, use `orchestrated-saga`.
+4. IF steps are loosely coupled domain events with independent ownership, use `choreographed-saga`.
+5. Define compensation for every non-terminal side effect, then add timeout, retry, and replay rules.
+6. Return a failure matrix that covers duplicate messages, partial completion, and stuck workflow recovery.
+
+## Rules
+1. Prefer Saga over 2PC for Django plus Go microservice estates.
+2. Persist saga state in durable storage before dispatching the next step.
+3. Every compensation path must be idempotent and safe to retry.
+4. External payment, email, and webhook calls need explicit timeout and reconciliation logic.
+5. Include operator-visible status states: `pending`, `in_progress`, `compensating`, `failed`, `completed`.
+
+## Constraints
+- Never claim cross-service strong consistency unless all writes stay inside one transactional boundary.
+- Never model compensation as a blind delete when downstream side effects may already be consumed.
+- Always include audit identifiers and correlation IDs.
+
+## Examples
+Input: order placement reserves inventory, charges card, creates shipment.
+Output: orchestrated saga where payment and inventory reservation run before shipment creation, with refund and inventory release compensations.
+
+## Output Style
+Return a concise architecture brief with step order, decision rationale, and explicit failure handling.

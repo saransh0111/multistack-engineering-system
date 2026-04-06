@@ -1,0 +1,69 @@
+---
+name: tech-stack-decision
+version: 2.0.0
+domain: exploration
+description: Choose an end-to-end stack by balancing product needs, team capability, delivery speed, security, and operating cost.
+tags: [exploration, tech-stack, architecture, decision]
+---
+
+## Purpose
+Select a coherent stack across frontend, backend, mobile, data, and infrastructure without local optimizations that break the whole system.
+
+## When to Use
+Use at project inception, major re-platforming, or when constraints force a stack rethink.
+
+## Input Format
+```yaml
+product:
+  type: string
+  channels: string[]
+  scale_expectation: string
+team:
+  strengths: string[]
+  size: number
+constraints:
+  compliance: string
+  timeline: string
+  budget: string
+```
+
+## Output Format
+```yaml
+stack_recommendation:
+  frontend: string
+  backend: string
+  data: string
+  infra: string
+  mobile: string
+rationale:
+  strengths: string[]
+  tradeoffs: string[]
+risks:
+  - string
+```
+
+## Execution Logic
+1. Start from product shape and distribution channels.
+2. Eliminate stacks the team cannot deliver within the timeline.
+3. Map compliance and scale requirements to architecture boundaries.
+4. Prefer stack coherence and operational simplicity over tool maximalism.
+5. Return the stack with major tradeoffs and risks.
+
+## Rules
+1. Team capability matters.
+2. Security and operations count as first-class criteria.
+3. Optimize for the next 12 to 24 months, not hypothetical hyperscale only.
+4. Avoid mixing too many paradigms without a clear payoff.
+5. Mention exit costs from the chosen stack.
+
+## Constraints
+- Never recommend a stack with no in-house operating capability on a tight timeline.
+- Never ignore security or compliance constraints.
+- Never present a stack list without rationale.
+
+## Examples
+Input: SEO-heavy B2B SaaS with mobile companion apps and moderate compliance.
+Output: Next.js, Django plus Go services, PostgreSQL, Kubernetes, and React Native or native mobile rationale.
+
+## Output Style
+Return a stack decision brief with fit, tradeoffs, and risk notes.

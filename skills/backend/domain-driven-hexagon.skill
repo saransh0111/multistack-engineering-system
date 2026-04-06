@@ -1,0 +1,82 @@
+---
+name: domain-driven-hexagon
+version: 2.0.0
+domain: backend
+description: Model backend systems with bounded contexts, aggregates, ports and adapters, application services, and domain-centric boundaries.
+tags: [backend, ddd, hexagonal, domain, architecture]
+---
+
+## Purpose
+Apply domain-driven and hexagonal architecture patterns where they improve correctness, evolvability, and team clarity.
+
+## When to Use
+Use for complex business domains, regulated workflows, or systems where invariants and domain language matter more than CRUD speed alone.
+
+## Input Format
+```yaml
+domain:
+  core_entities: string[]
+  invariants: string[]
+  external_integrations: string[]
+requirements:
+  complexity: "low" | "medium" | "high"
+  auditability: "standard" | "high"
+```
+
+## Output Format
+```yaml
+domain_model:
+  bounded_contexts: string[]
+  aggregates: string[]
+  domain_services: string[]
+  value_objects: string[]
+  domain_events: string[]
+  domain_errors: string[]
+hexagon:
+  modules: string[]
+  commands_and_queries: string[]
+  inbound_ports: string[]
+  outbound_ports: string[]
+  adapters: string[]
+validation_strategy:
+  compile_time: string[]
+  runtime: string[]
+tradeoffs:
+  benefits: string[]
+  costs: string[]
+```
+
+## Execution Logic
+1. Determine whether the domain merits DDD and hexagonal complexity.
+2. IF the domain is simple CRUD, keep the architecture lighter.
+3. IF invariants, auditability, or integration complexity are high, define bounded contexts and aggregate rules.
+4. Separate domain policy from transport and persistence concerns through ports and adapters.
+5. Introduce value objects where primitives hide domain meaning or permit illegal states.
+6. Separate commands and queries when it clarifies the model.
+7. Define compile-time and runtime validation boundaries, plus domain error types, when the domain is strict.
+8. Return both benefits and operating cost.
+
+## Rules
+1. Domain language must be explicit and consistent.
+2. Aggregates protect invariants, not every entity.
+3. Adapters should isolate infrastructure detail from the domain.
+4. Use application services to coordinate use cases, not to hide an anemic domain model.
+5. Prefer modules that behave like bounded mini-applications with private internals and small public surfaces.
+6. Use domain events for important domain facts and integration events for cross-boundary communication.
+7. Make illegal states unrepresentable when feasible through value objects and modeling choices.
+8. Keep the architecture proportional to the domain complexity.
+9. Use domain errors to encode business failure modes explicitly instead of leaking infrastructure exceptions.
+
+## Constraints
+- Never impose hexagonal layering on trivial CRUD systems without reason.
+- Never let adapters leak infrastructure types into the domain model.
+- Never confuse package structure with bounded context design.
+- Never let modules import each other freely; communicate through public facades, messages, or explicit ports.
+- Never push all validation to controllers if the domain itself has invariant rules.
+
+## Examples
+Input: lending workflow with eligibility, underwriting, and disbursement invariants.
+Output: bounded contexts, aggregate boundaries, and ports for risk, payments, and notifications.
+
+## Output Style
+Return a domain-first architecture brief with explicit tradeoffs.

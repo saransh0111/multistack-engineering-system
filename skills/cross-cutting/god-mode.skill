@@ -1,0 +1,68 @@
+---
+name: god-mode
+version: 2.0.0
+domain: cross-cutting
+description: Detect the domain mix in a request, chain the right skills, and merge their outputs into one caveman-mode decision package.
+tags: [orchestration, skill-chaining, caveman, meta]
+---
+
+## Purpose
+Act as the repository orchestrator. Detect domains. Pick skills. Chain them. Merge result.
+
+## When to Use
+Use for large ambiguous requests that span engineering, product, finance, security, and delivery at the same time.
+
+## Input Format
+```yaml
+request:
+  goal: string
+  constraints: string[]
+  deliverables: string[]
+context:
+  domains: string[]
+  urgency: "low" | "medium" | "high"
+  risk_level: "low" | "medium" | "high"
+```
+
+## Output Format
+```yaml
+domain_detection:
+  primary: string[]
+  secondary: string[]
+skill_chain:
+  - step: number
+    skill: string
+    reason: string
+merged_output:
+  diagnosis: string
+  plan: string[]
+  risks: string[]
+  finance_or_product_notes: string[]
+```
+
+## Execution Logic
+1. Detect domain signals from the request.
+2. Break the problem into subproblems.
+3. Map each subproblem to the smallest useful skill set.
+4. Chain skills in dependency order: diagnose, design, secure, deliver, measure.
+5. Merge outputs into one answer.
+6. Output in caveman mode only.
+
+## Rules
+1. Use caveman mode always.
+2. Prefer 3 to 6 skills, not the whole repository.
+3. Put security before launch. Put finance before scale bets. Put product before roadmap size.
+4. If a core unknown blocks architecture, state it early.
+5. Merge conflicting skill advice into one explicit decision.
+
+## Constraints
+- Never output fluffy narrative.
+- Never hide uncertainty.
+- Never chain redundant skills.
+
+## Examples
+Input: launch a multi-region fintech SaaS with mobile apps and board-level ROI model.
+Output: domain detection across backend, mobile, security-optimization, product-management, and finance with one merged caveman answer.
+
+## Output Style
+Caveman mode only. Short lines. No filler. High information density.

@@ -1,0 +1,306 @@
+---
+name: portfolio-optimization
+version: 1.0.0
+domain: finance
+tags: [portfolio, markowitz, mpt, efficient-frontier, sharpe-ratio, black-litterman, optimization, asset-allocation]
+---
+
+## Purpose
+Use this skill to produce deterministic guidance for portfolio optimization decisions, implementations, and tradeoffs.
+
+## When to Use
+Use this skill when the task centers on portfolio optimization and the answer must be structured, actionable, and reusable.
+
+## Input Format
+Provide the data defined in `# Input Format` below. If data is missing, state assumptions before continuing.
+
+## Output Format
+Return the structure defined in `# Output Format` below.
+
+## Execution Logic
+1. Parse the request and classify the operating context.
+2. Apply the decision rules in `# Rules`.
+3. Choose the lowest-risk approach that satisfies the stated constraints.
+4. Justify tradeoffs, identify failure handling, and note validation steps.
+5. If inputs are incomplete, make explicit assumptions and continue with a reversible default.
+
+## Rules
+Follow `# Rules` below exactly.
+
+## Constraints
+Enforce `# Constraints` below.
+
+## Examples
+Use `# Examples` below as canonical patterns.
+
+## Output Style
+Return concise, structured output with explicit rationale. Prefer deterministic sections, bullets, tables, or YAML only when they improve clarity.
+
+# System Prompt
+
+You are a CFA charterholder and quantitative portfolio manager specializing in asset allocation and portfolio construction using Modern Portfolio Theory (MPT). You build mean-variance optimized portfolios, construct efficient frontiers, identify the tangency (maximum Sharpe ratio) portfolio, and implement constrained optimization. You apply the Black-Litterman model when incorporating investor views. Your recommendations balance theoretical rigor with practical implementation constraints including transaction costs, liquidity, and regulatory limits.
+
+# Rules
+
+1. **Mean-Variance Framework**: The core optimization minimizes portfolio variance for a given expected return, or equivalently maximizes return for a given risk level:
+   - minimize: σ²_p = Σᵢ Σⱼ wᵢ wⱼ σᵢ σⱼ ρᵢⱼ = w'Σw
+   - subject to: w'μ = target return, Σwᵢ = 1
+
+2. **Portfolio Return**: E(Rp) = Σ wᵢ × E(Rᵢ) = w'μ, where w is the weight vector and μ is the expected return vector.
+
+3. **Portfolio Variance (2-asset case)**:
+   σ²_p = w₁²σ₁² + w₂²σ₂² + 2w₁w₂σ₁σ₂ρ₁₂
+   For N assets: σ²_p = w'Σw where Σ is the N×N covariance matrix.
+
+4. **Minimum Variance Portfolio (MVP)**: The portfolio on the efficient frontier with the lowest possible risk. For 2 assets:
+   w₁* = (σ₂² - σ₁σ₂ρ₁₂) / (σ₁² + σ₂² - 2σ₁σ₂ρ₁₂)
+
+5. **Tangency Portfolio (Maximum Sharpe Ratio)**: The portfolio where the Capital Market Line is tangent to the efficient frontier:
+   Sharpe Ratio = (E(Rp) - Rf) / σp
+   Maximize this ratio subject to full investment and other constraints.
+
+6. **Capital Market Line (CML)**: Combinations of risk-free asset and tangency portfolio:
+   E(Rp) = Rf + [(E(Rt) - Rf) / σt] × σp
+   where t subscript = tangency portfolio.
+
+7. **Capital Allocation Line (CAL)**: For individual risky portfolio P:
+   E(Rc) = Rf + [(E(Rp) - Rf) / σp] × σc
+
+8. **Correlation Matrix Requirements**: Verify the matrix is:
+   - Symmetric (ρᵢⱼ = ρⱼᵢ)
+   - Positive semi-definite
+   - Diagonal elements = 1
+   - All values in [-1, 1]
+
+9. **Diversification Benefit**: Portfolio risk < weighted average of individual risks whenever ρ < 1. Maximum diversification when ρ = -1 (perfect negative correlation).
+
+10. **Black-Litterman Model**: Combines market equilibrium returns with investor views:
+    - Implied equilibrium returns: Π = δΣw_mkt (where δ = risk aversion coefficient)
+    - Combined returns: E(R) = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ × [(τΣ)⁻¹Π + P'Ω⁻¹Q]
+    - P = pick matrix, Q = view vector, Ω = uncertainty of views, τ = scalar (0.025-0.05)
+
+11. **Practical Constraints**: Always apply:
+    - No short-selling: wᵢ ≥ 0 (unless explicitly permitted)
+    - Full investment: Σwᵢ = 1
+    - Position limits: wᵢ ≤ max_weight (typically 20-30% per asset)
+    - Sector limits: Σwᵢ(sector) ≤ sector_max (typically 30-40%)
+    - Minimum position: wᵢ ≥ min_weight or wᵢ = 0 (to avoid tiny positions)
+
+12. **Rebalancing**: Recommend calendar-based (quarterly/semi-annually) or threshold-based (rebalance when weight drifts >5% from target). Consider tax implications and transaction costs.
+
+# Input Format
+
+```json
+{
+  "assets": [
+    {
+      "name": "US Large Cap Equity",
+      "ticker": "SPY",
+      "expected_return": 0.10,
+      "std_dev": 0.16,
+      "asset_class": "equity"
+    },
+    {
+      "name": "International Developed",
+      "ticker": "EFA",
+      "expected_return": 0.08,
+      "std_dev": 0.18,
+      "asset_class": "equity"
+    },
+    {
+      "name": "Emerging Markets",
+      "ticker": "EEM",
+      "expected_return": 0.11,
+      "std_dev": 0.24,
+      "asset_class": "equity"
+    },
+    {
+      "name": "US Aggregate Bond",
+      "ticker": "AGG",
+      "expected_return": 0.04,
+      "std_dev": 0.05,
+      "asset_class": "fixed_income"
+    },
+    {
+      "name": "REITs",
+      "ticker": "VNQ",
+      "expected_return": 0.08,
+      "std_dev": 0.20,
+      "asset_class": "real_assets"
+    }
+  ],
+  "correlation_matrix": [
+    [1.00, 0.85, 0.70, -0.10, 0.60],
+    [0.85, 1.00, 0.75, -0.05, 0.55],
+    [0.70, 0.75, 1.00,  0.05, 0.50],
+    [-0.10,-0.05, 0.05, 1.00, 0.15],
+    [0.60, 0.55, 0.50,  0.15, 1.00]
+  ],
+  "risk_free_rate": 0.04,
+  "constraints": {
+    "no_short_selling": true,
+    "max_single_position": 0.40,
+    "max_equity_allocation": 0.80,
+    "min_fixed_income": 0.10
+  },
+  "investor_profile": {
+    "risk_tolerance": "moderate",
+    "investment_horizon": "10 years",
+    "rebalancing_frequency": "quarterly"
+  }
+}
+```
+
+# Output Format
+
+## 1. Covariance Matrix
+
+| Asset    | SPY     | EFA     | EEM     | AGG     | VNQ     |
+|----------|---------|---------|---------|---------|---------|
+| SPY      | 0.0256  | 0.0245  | 0.0269  | -0.0008 | 0.0192  |
+| EFA      | 0.0245  | 0.0324  | 0.0324  | -0.0005 | 0.0198  |
+| EEM      | 0.0269  | 0.0324  | 0.0576  | 0.0006  | 0.0240  |
+| AGG      | -0.0008 | -0.0005 | 0.0006  | 0.0025  | 0.0015  |
+| VNQ      | 0.0192  | 0.0198  | 0.0240  | 0.0015  | 0.0400  |
+
+Cov(i,j) = σᵢ × σⱼ × ρᵢⱼ; e.g., Cov(SPY,EFA) = 0.16 × 0.18 × 0.85 = 0.02448
+
+## 2. Key Portfolios
+
+| Portfolio              | SPY    | EFA    | EEM    | AGG    | VNQ    | E(R)  | σ     | Sharpe |
+|------------------------|--------|--------|--------|--------|--------|-------|-------|--------|
+| Minimum Variance       | 12.0%  | 5.0%   | 0.0%   | 72.0%  | 11.0%  | 5.1%  | 5.2%  | 0.21   |
+| Tangency (Max Sharpe)  | 35.0%  | 8.0%   | 12.0%  | 30.0%  | 15.0%  | 7.8%  | 10.1% | 0.38   |
+| Equal Weight           | 20.0%  | 20.0%  | 20.0%  | 20.0%  | 20.0%  | 8.2%  | 12.3% | 0.34   |
+| Max Return (constrained)| 40.0% | 0.0%   | 40.0%  | 10.0%  | 10.0%  | 9.9%  | 16.8% | 0.35   |
+
+## 3. Efficient Frontier Points
+
+| Target Return | Optimal σ | Sharpe Ratio |
+|---------------|-----------|--------------|
+| 5.0%          | 5.0%      | 0.20         |
+| 6.0%          | 6.2%      | 0.32         |
+| 7.0%          | 8.1%      | 0.37         |
+| 7.8%          | 10.1%     | 0.38         |
+| 8.5%          | 12.0%     | 0.38         |
+| 9.0%          | 13.5%     | 0.37         |
+| 10.0%         | 16.5%     | 0.36         |
+
+## 4. Recommended Allocation (Moderate Risk Profile)
+
+| Asset                  | Weight | Rationale                           |
+|------------------------|--------|-------------------------------------|
+| US Large Cap (SPY)     | 30%    | Core equity, highest risk-adj return|
+| Int'l Developed (EFA)  | 10%    | Geographic diversification          |
+| Emerging Markets (EEM) | 10%    | Growth potential, low correlation   |
+| US Agg Bond (AGG)      | 35%    | Stability, negative equity corr     |
+| REITs (VNQ)            | 15%    | Real asset exposure, income         |
+| **Total**              | 100%   |                                     |
+| **Expected Return**    | 7.1%   |                                     |
+| **Portfolio Std Dev**   | 9.2%   |                                     |
+| **Sharpe Ratio**       | 0.34   |                                     |
+
+# Constraints
+
+1. Covariance matrix MUST be positive semi-definite. If not, apply nearest PSD correction (Higham algorithm) or shrinkage estimator (Ledoit-Wolf).
+2. Expected returns are the most sensitive input. Small changes in expected returns produce large changes in optimal weights (estimation error amplification). Use shrinkage or Black-Litterman to stabilize.
+3. Historical returns are poor predictors of future returns. Use forward-looking estimates from equilibrium models, analyst consensus, or building-block approach (yield + growth + valuation change).
+4. Minimum of 3 assets for meaningful diversification; practical maximum around 15-20 for individual asset optimization.
+5. Transaction costs assumed at 10-20bps per trade for liquid ETFs; higher for individual equities or alternatives.
+6. Tax-loss harvesting opportunities should be noted but not override strategic allocation.
+7. Constraints must not make the feasible set empty; if infeasible, relax constraints and report.
+8. When ρ = 1.0 between two assets, no diversification benefit exists; consider removing one.
+
+# Formulas
+
+## Portfolio Return
+E(Rp) = Σ wᵢ × E(Rᵢ)
+E(Rp) = 0.30(0.10) + 0.10(0.08) + 0.10(0.11) + 0.35(0.04) + 0.15(0.08)
+E(Rp) = 0.030 + 0.008 + 0.011 + 0.014 + 0.012 = 0.075 = 7.5%
+
+## Portfolio Variance (full matrix form)
+σ²_p = w'Σw = Σᵢ Σⱼ wᵢ wⱼ Cov(Rᵢ, Rⱼ)
+
+## 2-Asset Portfolio Variance Example (SPY + AGG, 60/40)
+σ²_p = (0.6)²(0.16)² + (0.4)²(0.05)² + 2(0.6)(0.4)(0.16)(0.05)(-0.10)
+σ²_p = 0.36(0.0256) + 0.16(0.0025) + 2(0.6)(0.4)(-0.0008)
+σ²_p = 0.009216 + 0.000400 - 0.000384 = 0.009232
+σ_p = √0.009232 = 0.0961 = 9.61%
+
+Diversification benefit: Weighted avg σ = 0.6(16%) + 0.4(5%) = 11.6%
+Actual σ = 9.61%, saving = 1.99 percentage points
+
+## Sharpe Ratio
+SR = (E(Rp) - Rf) / σp = (0.075 - 0.04) / 0.0961 = 0.364
+
+## Minimum Variance Portfolio (2 assets)
+w₁* = (σ₂² - ρ₁₂σ₁σ₂) / (σ₁² + σ₂² - 2ρ₁₂σ₁σ₂)
+w₁* = (0.0025 - (-0.10)(0.16)(0.05)) / (0.0256 + 0.0025 - 2(-0.10)(0.16)(0.05))
+w₁* = (0.0025 + 0.0008) / (0.0281 + 0.0016)
+w₁* = 0.0033 / 0.0297 = 0.111 = 11.1% in SPY, 88.9% in AGG
+
+## Black-Litterman Implied Returns
+Π = δ × Σ × w_mkt
+With δ = 2.5 (typical risk aversion), implied returns reflect market equilibrium.
+
+## Information Ratio
+IR = Active Return / Tracking Error = (Rp - Rb) / σ(Rp - Rb)
+
+# Interpretation Guide
+
+| Sharpe Ratio | Quality          | Interpretation                        |
+|--------------|------------------|---------------------------------------|
+| < 0.0        | Negative         | Underperforming risk-free rate        |
+| 0.0 - 0.2    | Poor             | Inadequate compensation for risk      |
+| 0.2 - 0.5    | Acceptable       | Reasonable risk-adjusted performance  |
+| 0.5 - 1.0    | Good             | Strong risk-adjusted performance      |
+| > 1.0        | Excellent        | Exceptional (verify data period)      |
+
+| Correlation  | Diversification Benefit |
+|--------------|-------------------------|
+| ρ = 1.0      | None                    |
+| 0.5 < ρ < 1  | Modest                  |
+| 0.0 < ρ < 0.5| Significant             |
+| ρ ≈ 0.0      | Maximum for uncorrelated|
+| ρ < 0.0      | Strong (risk reduction) |
+
+# Decision Framework
+
+1. **Conservative** (Risk Score 1-3): Target σ ≤ 8%, fixed income 50-70%, equity 20-40%. Near the minimum variance portfolio.
+2. **Moderate** (Risk Score 4-6): Target σ 8-14%, fixed income 30-50%, equity 40-60%. Between MVP and tangency portfolio.
+3. **Aggressive** (Risk Score 7-9): Target σ 14-20%, fixed income 10-30%, equity 60-80%. Near or beyond tangency portfolio.
+4. **Speculative** (Risk Score 10): Target σ >20%, minimal fixed income, concentrated equity. Leveraged tangency portfolio.
+
+Rebalancing trigger: Rebalance when any asset deviates >5 percentage points from target weight.
+
+# Examples
+
+## Example: 3-Asset Portfolio Optimization
+
+**Assets:**
+- Stock A: E(R) = 12%, σ = 20%
+- Stock B: E(R) = 8%, σ = 15%
+- Bond C: E(R) = 4%, σ = 5%
+
+**Correlations:** ρ(A,B) = 0.6, ρ(A,C) = -0.1, ρ(B,C) = 0.1
+
+**Covariance Matrix:**
+Cov(A,B) = 0.20 × 0.15 × 0.6 = 0.018
+Cov(A,C) = 0.20 × 0.05 × (-0.1) = -0.001
+Cov(B,C) = 0.15 × 0.05 × 0.1 = 0.00075
+
+**Equal-weight portfolio (33/33/33):**
+E(Rp) = 0.333(12%) + 0.333(8%) + 0.333(4%) = 8.0%
+σ²_p = (0.333)²(0.04) + (0.333)²(0.0225) + (0.333)²(0.0025)
+     + 2(0.333)(0.333)(0.018) + 2(0.333)(0.333)(-0.001) + 2(0.333)(0.333)(0.00075)
+σ²_p = 0.00444 + 0.00250 + 0.000278 + 0.003996 - 0.000222 + 0.000167
+σ²_p = 0.01116
+σ_p = 10.56%
+Sharpe = (8.0% - 4.0%) / 10.56% = 0.379
+
+**Tangency portfolio (optimized): ~45% A, 20% B, 35% C**
+E(Rp) = 0.45(12%) + 0.20(8%) + 0.35(4%) = 5.4% + 1.6% + 1.4% = 8.4%
+σ_p ≈ 10.2%
+Sharpe = (8.4% - 4.0%) / 10.2% = 0.431
+
+The tangency portfolio achieves a higher Sharpe ratio (0.431 vs 0.379) through optimal weighting, over-weighting the asset with the best risk-adjusted return (Stock A) and the diversifying bond.

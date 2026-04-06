@@ -1,0 +1,62 @@
+---
+name: feature-prioritization
+version: 2.0.0
+domain: product-management
+description: Prioritize features using RICE-style scoring plus strategic and operational constraints.
+tags: [product, prioritization, rice, roadmap]
+---
+
+## Purpose
+Rank feature work by impact, effort, confidence, and strategic fit.
+
+## When to Use
+Use for roadmap planning, quarterly prioritization, and backlog rationalization.
+
+## Input Format
+```yaml
+features:
+  - name: string
+    reach: number
+    impact: number
+    confidence: number
+    effort: number
+    strategic_fit: "low" | "medium" | "high"
+constraints:
+  capacity: string
+  dependencies: string[]
+```
+
+## Output Format
+```yaml
+ranking:
+  - name: string
+    score: number
+    decision: "now" | "next" | "later" | "drop"
+notes:
+  tradeoffs: string[]
+```
+
+## Execution Logic
+1. Score each feature on reach, impact, confidence, and effort.
+2. Adjust for strategic fit, compliance, and dependency reality.
+3. Remove items that consume capacity without moving the core metric.
+4. Return ranked decisions, not just scores.
+
+## Rules
+1. Low-confidence bets should be penalized.
+2. Compliance and platform debt can outrank feature optics.
+3. Capacity is real; rank within it.
+4. Tie choices to one or two north-star outcomes.
+5. Document why dropped items are dropped.
+
+## Constraints
+- Never rank features without effort.
+- Never hide strategic overrides to pure RICE score.
+- Never prioritize everything.
+
+## Examples
+Input: ten quarterly roadmap options.
+Output: now/next/later/drop list with rationale.
+
+## Output Style
+Return a ranked list with explicit tradeoffs.
