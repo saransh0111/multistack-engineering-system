@@ -2,6 +2,8 @@
 
 Primary entry for **multistack-engineering-system**. Read [README.md](README.md) for repository purpose, installation, and maintainer details. This file explains **how skills work**, **how to pick them**, and gives **copy-paste prompts**.
 
+**Avoid cloning the repo for every project:** use the **`multistack` CLI** ([CLI install](README.md#cli-install-recommended)) — `multistack install`, then `multistack skill cross-cutting/god-mode.skill` to get an absolute path for `@` in Cursor.
+
 ---
 
 ## What this repository is (in one picture)

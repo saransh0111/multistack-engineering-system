@@ -1,0 +1,48 @@
+{
+  "name": "multistack-skill-cli",
+  "version": "0.1.1",
+  "description": "Install, update, and locate multistack-engineering-system skills on your machine",
+  "license": "MIT",
+  "author": "Saransh Nirmalkar",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saransh0111/multistack-engineering-system.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/saransh0111/multistack-engineering-system#cli-install-recommended",
+  "bugs": {
+    "url": "https://github.com/saransh0111/multistack-engineering-system/issues"
+  },
+  "keywords": [
+    "cursor",
+    "skills",
+    "cli",
+    "multistack"
+  ],
+  "type": "module",
+  "bin": {
+    "multistack": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "node --import tsx src/cli.ts",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

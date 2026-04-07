@@ -1,6 +1,7 @@
 # multistack-engineering-system
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![npm](https://img.shields.io/npm/v/multistack-skill-cli.svg)](https://www.npmjs.com/package/multistack-skill-cli)
 [![Skills](https://img.shields.io/badge/skills-Cursor%20%7C%20IDE-6366f1.svg)](./SKILL-GUIDE.md)
 
 Structured **skills** and **engineering rules** for AI-assisted development across backend, frontend, mobile, infrastructure, security, product strategy, and quantitative finance. Designed for use with [Cursor](https://cursor.com) and similar editors that support file-attached context.
@@ -15,6 +16,7 @@ This repository contains **documentation and configuration**, not a deployable a
 - [What’s included](#whats-included)
 - [Documentation](#documentation)
 - [Getting started](#getting-started)
+- [CLI install (recommended)](#cli-install-recommended)
 - [Repository layout](#repository-layout)
 - [Skill format](#skill-format)
 - [Domains](#domains)
@@ -23,6 +25,7 @@ This repository contains **documentation and configuration**, not a deployable a
 - [Validation](#validation)
 - [Reference implementations](#reference-implementations)
 - [Contributing](#contributing)
+- [Changelog](#changelog)
 - [Maintainer](#maintainer)
 - [License](#license)
 
@@ -52,6 +55,7 @@ This repository contains **documentation and configuration**, not a deployable a
 | [`rules/`](./rules) | Markdown standards: APIs, logging, naming, frontend, mobile, finance calculations. |
 | [`scripts/validate-skills.sh`](./scripts/validate-skills.sh) | Validator for required sections and layout. |
 | [`reference/`](./reference/README.md) | **Optional** sample code (currently a React + Vite workspace under `reference/frontend/`). Not required to use skills or rules. |
+| [`cli/`](cli/) | **`multistack` CLI** (npm: `multistack-skill-cli`) — install the skill pack once globally; `path` / `skill` for Cursor `@` references. |
 
 ---
 
@@ -68,36 +72,64 @@ For a large or ambiguous task, start with [`skills/cross-cutting/god-mode.skill`
 
 ## Getting started
 
-### 1. Clone
+1. **Install the files once** — follow [CLI install](#cli-install-recommended) (`npm install -g multistack-skill-cli`, then `multistack install`).  
+   *Alternative:* clone this repo anywhere and point your editor at paths under `skills/`.
+
+2. **Use a skill in the editor** — in Cursor (or similar), attach a `.skill` file with `@`. After a CLI install, print a path with `multistack skill cross-cutting/god-mode.skill` and paste it after `@`, then type your task.
+
+3. **Go deeper** — read [SKILL-GUIDE.md](SKILL-GUIDE.md) for how skills are structured and how to combine them.
+
+---
+
+## CLI install (recommended)
+
+The **`multistack`** command installs this repo into a **single folder** on your machine (so you don’t clone it into every project). **Requirements:** Node 18+, Git, and [npm](https://www.npmjs.com/).
+
+**Install**
 
 ```bash
-git clone https://github.com/saransh0111/multistack-engineering-system.git
-cd multistack-engineering-system
+npm install -g multistack-skill-cli
+multistack install
 ```
 
-You can also add this repo as a **git submodule** inside an application repository.
-
-### 2. Read the guide
-
-Open [SKILL-GUIDE.md](SKILL-GUIDE.md) before editing or invoking skills.
-
-### 3. Use skills in your editor
-
-Reference a skill with a path your tool understands (example for Cursor-style `@` attachment):
-
-```text
-@multistack-engineering-system/skills/backend/api-versioning.skill
-
-We need a versioning plan for a public mobile API with slow client upgrades.
-Return support window, deprecation path, and contract test policy.
-```
-
-Adjust the path to match where you cloned the repository.
-
-### 4. Validate after changes
+Optional checks:
 
 ```bash
-./scripts/validate-skills.sh
+multistack doctor
+multistack update    # later: pull latest from main
+```
+
+**Use a skill in Cursor** — print an absolute path, then attach it with `@`:
+
+```bash
+multistack skill cross-cutting/god-mode.skill
+```
+
+| Command | What it does |
+|--------|----------------|
+| `multistack install` | Shallow clone of [this repo](https://github.com/saransh0111/multistack-engineering-system) (branch `main` by default) |
+| `multistack update` | `git pull --ff-only` in the install directory |
+| `multistack path` | Print install root (`--json` for scripts) |
+| `multistack skill <path>` | Print absolute path to a `.skill` file |
+| `multistack list` | List domains under `skills/` |
+| `multistack doctor` | Check Node, Git, and install layout |
+
+**Where files go**
+
+| | |
+|--|--|
+| **macOS / Linux** | `~/.local/share/multistack-engineering-system` |
+| **Windows** | `%LOCALAPPDATA%\multistack-engineering-system` |
+| **`MULTISTACK_HOME`** | Override install directory (absolute path) |
+| **`MULTISTACK_REPO_URL`** | Override clone URL (e.g. your fork) |
+| **`MULTISTACK_MINIMAL_BANNER`** | Set to `1` (or `true`) to skip the large banner art (narrow terminals / CI) |
+
+Set **`NO_COLOR=1`** to disable ANSI colors in the CLI.
+
+**Develop the CLI from a clone** (contributors):
+
+```bash
+cd cli && npm install && npm run build && npm link
 ```
 
 ---
@@ -108,6 +140,7 @@ Adjust the path to match where you cloned the repository.
 multistack-engineering-system/
 ├── SKILL-GUIDE.md
 ├── README.md
+├── cli/                    ← multistack CLI (npm package: multistack-skill-cli)
 ├── scripts/
 │   └── validate-skills.sh
 ├── rules/
@@ -218,7 +251,13 @@ The [`reference/`](reference/README.md) directory holds **optional** sample impl
 
 ## Contributing
 
-Issues and pull requests are welcome: skill improvements, new rules, documentation clarity, and validator fixes. Please run `./scripts/validate-skills.sh` before submitting changes that touch `skills/`.
+Issues and pull requests are welcome: skill improvements, new rules, documentation clarity, and validator fixes. Please run `./scripts/validate-skills.sh` before submitting changes that touch `skills/`. For CLI changes, run `cd cli && npm install && npm run build && npm test` and smoke-test `multistack doctor` (after `npm link`) or `node dist/cli.js doctor`.
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ---
 
